@@ -8,12 +8,14 @@
 
 | Слой | Состояние |
 |---|---|
-| Контракты данных и конфиги (`schema.py`, `config.py`, `configs/`) | готово, 18 тестов |
-| Валидация и сжатие HTML | в работе |
-| QLoRA-обучение | в работе |
-| Слияние адаптера, GGUF | в работе |
-| Оценка качества | в работе |
-| Синтетика через teacher-модель | в работе |
+| Контракты данных и конфиги (`schema.py`, `config.py`, `configs/`) | готово |
+| Сжатие HTML и токенизация | готово |
+| Валидация, дедуп, group-aware splits, CLI | готово |
+| QLoRA-обучение (dataset, trainer, smoke-режим) | готово, проверено dry-run |
+| Слияние адаптера и конвертация в GGUF | готово |
+| Оценка качества (JSON validity, P/R/F1) | готово |
+| Синтетика через teacher-модель | готово |
+| Источники данных и лицензии | [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) |
 
 ## Структура
 
@@ -22,10 +24,11 @@ configs/            data.yaml, train_qlora_4gb.yaml, eval.yaml, tasks.yaml
 src/web2spec/       библиотека пайплайна
 scripts/            01_validate.py … 07_synth.py, ps1-обёртки
 tests/              pytest, без тяжёлых зависимостей
+examples/demo.jsonl 3 примера для проверки пайплайна без скрапинга
 data/{raw,interim,processed,reports}/
 models/{base,merged,gguf}/
 outputs/runs/       адаптеры, чекпоинты, логи
-docs/               PLAN.md (стратегия), IMPLEMENTATION_PLAN.md (сборка)
+docs/               PLAN.md, IMPLEMENTATION_PLAN.md, DATA_SOURCES.md
 ```
 
 ## Быстрый старт
@@ -34,7 +37,8 @@ docs/               PLAN.md (стратегия), IMPLEMENTATION_PLAN.md (сбо
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 
-python scripts/01_validate.py --input data/raw/samples.jsonl --output data/processed
+python scripts/01_validate.py --input examples/demo.jsonl --output data/processed
+python scripts/02_train.py --dry-run
 python scripts/02_train.py --config configs/train_qlora_4gb.yaml --smoke
 python scripts/03_merge.py --config configs/train_qlora_4gb.yaml
 pwsh scripts/04_convert_gguf.ps1
