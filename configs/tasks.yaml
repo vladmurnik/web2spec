@@ -1,0 +1,47 @@
+# JSON Schema per task. `extract` is intentionally permissive for v1:
+# the concrete field schema is fixed later, per domain, in data/README.
+extract:
+  type: object
+  minProperties: 1
+  additionalProperties: true
+
+spec:
+  type: object
+  additionalProperties: false
+  required: [version, fields]
+  properties:
+    version:
+      type: integer
+      const: 1
+    fields:
+      type: object
+      minProperties: 1
+      additionalProperties:
+        type: object
+        additionalProperties: false
+        required: [selector]
+        properties:
+          selector:
+            type: string
+            minLength: 1
+          attr:
+            type: string
+          required:
+            type: boolean
+    pagination:
+      type: object
+      additionalProperties: false
+      properties:
+        selector:
+          type: string
+        attr:
+          type: string
+
+qa:
+  type: object
+  additionalProperties: false
+  required: [answer]
+  properties:
+    answer:
+      type: string
+      minLength: 1

@@ -1,0 +1,7 @@
+model_dir: models/merged/qwen2.5-0.5b-ft
+data: data/processed/test.jsonl
+report: data/reports/eval_report.json
+max_new_tokens: 256
+temperature: 0.0
+batch_size: 1
+limit: 200
