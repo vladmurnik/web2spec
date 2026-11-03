@@ -7,6 +7,7 @@ dataset checks work before the ML stack is installed.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,14 @@ def _torch_dtype(name: str) -> Any:
         "float16": torch.float16,
         "float32": torch.float32,
     }[name]
+
+
+def _dtype_kwarg(dtype: Any) -> dict[str, Any]:
+    """Transformers v5 renamed ``torch_dtype`` to ``dtype``."""
+    import transformers
+
+    major = int(transformers.__version__.split(".", 1)[0])
+    return {"dtype" if major >= 5 else "torch_dtype": dtype}
 
 
 def build_model_and_tokenizer(cfg: TrainConfig) -> tuple[Any, Any]:
@@ -56,7 +65,7 @@ def build_model_and_tokenizer(cfg: TrainConfig) -> tuple[Any, Any]:
     model = AutoModelForCausalLM.from_pretrained(
         cfg.base_model,
         quantization_config=quantization_config,
-        torch_dtype=compute_dtype,
+        **_dtype_kwarg(compute_dtype),
         device_map={"": 0} if use_cuda else None,
         attn_implementation=cfg.attn_implementation if use_cuda else "eager",
         trust_remote_code=False,
@@ -87,6 +96,7 @@ def build_training_arguments(
     *,
     output_dir: Path,
     has_eval: bool,
+    warmup_steps: int = 0,
     smoke: bool = False,
 ) -> Any:
     import torch
@@ -103,7 +113,7 @@ def build_training_arguments(
         "learning_rate": cfg.lr,
         "weight_decay": cfg.weight_decay,
         "lr_scheduler_type": cfg.scheduler,
-        "warmup_ratio": cfg.warmup_ratio,
+        "warmup_steps": warmup_steps,
         "optim": cfg.optim,
         "max_grad_norm": cfg.max_grad_norm,
         "gradient_checkpointing": cfg.gradient_checkpointing,
@@ -124,11 +134,7 @@ def build_training_arguments(
         "max_steps": 20 if smoke else -1,
         "logging_first_step": True,
     }
-    try:
-        return TrainingArguments(**kwargs)
-    except TypeError:
-        kwargs["evaluation_strategy"] = kwargs.pop("eval_strategy")
-        return TrainingArguments(**kwargs)
+    return TrainingArguments(**kwargs)
 
 
 def train(cfg: TrainConfig, data_cfg: DataConfig, *, smoke: bool = False) -> Path:
@@ -159,8 +165,15 @@ def train(cfg: TrainConfig, data_cfg: DataConfig, *, smoke: bool = False) -> Pat
     val_ds = ExtractionDataset(val_samples, tokenizer, cfg.max_seq_len) if val_samples else None
     collator = CausalLMCollator(tokenizer.pad_token_id or tokenizer.eos_token_id)
 
+    steps_per_epoch = math.ceil(len(train_ds) / max(1, cfg.batch_size * cfg.grad_accum))
+    total_steps = 20 if smoke else max(1, steps_per_epoch * cfg.epochs)
+    warmup_steps = 1 if smoke else max(1, round(total_steps * cfg.warmup_ratio))
     args = build_training_arguments(
-        cfg, output_dir=out_dir, has_eval=val_ds is not None, smoke=smoke
+        cfg,
+        output_dir=out_dir,
+        has_eval=val_ds is not None,
+        warmup_steps=warmup_steps,
+        smoke=smoke,
     )
     callbacks = []
     if val_ds is not None and cfg.early_stopping_patience > 0 and not smoke:
