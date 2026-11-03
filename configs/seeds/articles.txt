@@ -1,0 +1,3 @@
+# News/article feeds. The collector expands RSS items into article URLs.
+https://lenta.ru/rss
+https://habr.com/ru/rss/articles/

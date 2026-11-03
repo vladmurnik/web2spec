@@ -1,7 +1,7 @@
-base_model: Qwen/Qwen2.5-0.5B-Instruct
+﻿base_model: Qwen/Qwen2.5-0.5B-Instruct
 output_dir: outputs/runs/qwen05b-qlora-v1
 seed: 42
-max_seq_len: 1024
+max_seq_len: 1536
 
 quant:
   load_in_4bit: true

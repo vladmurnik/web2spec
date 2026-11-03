@@ -24,7 +24,14 @@ def _iter_inputs(path: Path) -> list[Path]:
         return [path]
     if not path.exists():
         raise FileNotFoundError(f"input not found: {path}")
-    return sorted(p for p in path.iterdir() if p.suffix.lower() in {".jsonl", ".json"})
+    files = [
+        p
+        for p in path.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() in {".jsonl", ".json"}
+        and not p.name.startswith("quarantine")
+    ]
+    return sorted(files)
 
 
 def _compress_input(source: Path, target: Path, max_chars: int, limit: int | None) -> int:

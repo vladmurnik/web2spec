@@ -132,7 +132,7 @@ def compress_html(html: str, *, max_chars: int = 12_000) -> str:
                 clean[lowered] = text_value[:_ATTR_LIMIT]
         tag.attrs = clean
 
-    body = soup.body or soup
+    body = _content_root(soup)
     text = str(body)
     text = _WS_RE.sub(" ", text)
     text = _TAG_WS_RE.sub("><", text).strip()
@@ -142,6 +142,26 @@ def compress_html(html: str, *, max_chars: int = 12_000) -> str:
     if len(text) > max_chars:
         return _truncate(text, max_chars)
     return text
+
+
+def _content_root(soup: BeautifulSoup):
+    """Pick the main content region so truncation does not cut off the product card."""
+    candidates = []
+    for name in ("main", "article"):
+        candidates.extend(soup.find_all(name))
+    if not candidates:
+        candidates = [
+            node
+            for node in soup.find_all(attrs={"role": "main"})
+            if getattr(node, "name", None)
+        ]
+    if candidates:
+        best = max(candidates, key=lambda node: len(node.get_text(" ", strip=True)))
+        if len(best.get_text(" ", strip=True)) >= 200:
+            return best
+    for node in soup.find_all(["nav", "header", "footer", "aside"]):
+        node.decompose()
+    return soup.body or soup
 
 
 def _truncate(text: str, max_chars: int) -> str:

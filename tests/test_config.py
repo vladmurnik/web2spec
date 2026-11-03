@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -17,7 +17,7 @@ from web2spec.config import (
 def test_shipped_train_config_matches_4gb_plan():
     cfg = load_train_config()
     assert cfg.base_model == "Qwen/Qwen2.5-0.5B-Instruct"
-    assert cfg.max_seq_len == 1024
+    assert cfg.max_seq_len == 1536
     assert cfg.batch_size == 1
     assert cfg.grad_accum == 16
     assert cfg.effective_batch_size == 16
@@ -69,3 +69,4 @@ def test_missing_config_raises(tmp_path: Path):
 def test_sequence_length_bounds():
     with pytest.raises(ValidationError):
         TrainConfig(max_seq_len=99)
+
