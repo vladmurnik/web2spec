@@ -140,7 +140,13 @@ def build_training_arguments(
     return TrainingArguments(**kwargs)
 
 
-def train(cfg: TrainConfig, data_cfg: DataConfig, *, smoke: bool = False) -> Path:
+def train(
+    cfg: TrainConfig,
+    data_cfg: DataConfig,
+    *,
+    smoke: bool = False,
+    resume_from_checkpoint: str | Path | None = None,
+) -> Path:
     import torch
     from transformers import EarlyStoppingCallback, Trainer
 
@@ -191,7 +197,9 @@ def train(cfg: TrainConfig, data_cfg: DataConfig, *, smoke: bool = False) -> Pat
         callbacks=callbacks,
     )
     started = datetime.now(UTC)
-    trainer.train()
+    trainer.train(
+        resume_from_checkpoint=str(resume_from_checkpoint) if resume_from_checkpoint else None
+    )
 
     adapter_dir = out_dir / "adapter"
     model.save_pretrained(adapter_dir)

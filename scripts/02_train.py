@@ -17,6 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-config", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true", help="только проверить датасет")
     parser.add_argument("--smoke", action="store_true", help="20 шагов на 32 примерах")
+    parser.add_argument("--resume-from-checkpoint", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args(argv)
 
@@ -48,7 +49,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from web2spec.train import train
 
-    adapter = train(train_cfg, data_cfg, smoke=args.smoke)
+    adapter = train(
+        train_cfg,
+        data_cfg,
+        smoke=args.smoke,
+        resume_from_checkpoint=args.resume_from_checkpoint,
+    )
     print(f"Готово. Адаптер: {adapter}")
     print("Дальше: python scripts/03_merge.py")
     return 0
