@@ -2,7 +2,7 @@
 
 Дообучение **Qwen2.5-0.5B-Instruct** превращать сжатый HTML в структурированный JSON на ноутбуке с **4 GB VRAM** (RTX 3050 Ti Laptop).
 
-Проект намеренно не учит модель писать скраперы. Модель заполняет целевую схему, а код/селекторы при необходимости рендерит детерминированный слой. Причины и границы — в [`docs/PLAN.md`](docs/PLAN.md), порядок сборки — в [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+Проект намеренно не учит модель писать скраперы. Текущий production-компонент — extraction: модель заполняет целевую схему, а код/селекторы при необходимости рендерит детерминированный слой. Следующий шаг — task-conditioned planner: модель по задаче решает, что собирать. Общий roadmap — [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md), детальный следующий шаг — [`docs/PLANNER_PLAN.md`](docs/PLANNER_PLAN.md). Причины и границы — в [`docs/PLAN.md`](docs/PLAN.md), порядок сборки — в [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
 ## Статус
 
@@ -19,6 +19,8 @@
 | Синтетический генератор (`09_make_synthetic.py`) | готово |
 | Датасет и его ограничения | [`docs/DATASET.md`](docs/DATASET.md) |
 | Источники данных и лицензии | [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) |
+| Общий план развития | [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md) |
+| План следующего шага (planner) | [`docs/PLANNER_PLAN.md`](docs/PLANNER_PLAN.md) |
 
 ## Структура
 
@@ -31,7 +33,7 @@ examples/demo.jsonl 3 примера для проверки пайплайна 
 data/{raw,interim,processed,reports}/
 models/{base,merged,gguf}/
 outputs/runs/       адаптеры, чекпоинты, логи
-docs/               PLAN.md, IMPLEMENTATION_PLAN.md, DATA_SOURCES.md, DATASET.md
+docs/               PLAN.md, IMPLEMENTATION_PLAN.md, MASTER_PLAN.md, PLANNER_PLAN.md, DATA_SOURCES.md, DATASET.md, STATS.md
 ```
 
 ## Быстрый старт

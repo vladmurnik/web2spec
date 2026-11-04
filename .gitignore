@@ -25,3 +25,6 @@ outputs/**
 
 .env
 .env.*
+
+# local llama.cpp build and downloaded binaries
+models/llama.cpp/
