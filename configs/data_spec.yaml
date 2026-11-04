@@ -1,8 +1,8 @@
-paths:
+﻿paths:
   processed: data/spec
   reports: data/reports
 
-tokenizer: Qwen/Qwen2.5-Coder-0.5B-Instruct
+tokenizer: Qwen/Qwen2.5-0.5B-Instruct
 max_seq_len: 1536
 min_chars: 50
 max_chars: 200000
@@ -11,3 +11,4 @@ val_ratio: 0.1
 seed: 42
 dedup: true
 task_schemas: configs/tasks.yaml
+

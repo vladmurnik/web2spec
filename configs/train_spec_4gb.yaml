@@ -1,4 +1,4 @@
-base_model: Qwen/Qwen2.5-Coder-0.5B-Instruct
+﻿base_model: Qwen/Qwen2.5-0.5B-Instruct
 output_dir: outputs/runs/qwen05b-spec-v1
 seed: 42
 max_seq_len: 1536
@@ -39,3 +39,4 @@ logging_steps: 10
 save_steps: 50
 eval_steps: 50
 early_stopping_patience: 2
+
