@@ -53,7 +53,7 @@ teacher-модель ──> synth ──> execution/схема-фильтр ─
 |---|---|
 | `REPO_ROOT` | `transformer/`, все относительные пути резолвятся от него |
 | `Paths` | `raw/interim/processed/reports/base_model/merged/gguf/runs` |
-| `DataConfig` | tokenizer, `max_seq_len=1024`, лимиты длины, `val_ratio`, `seed`, `task_schemas` |
+| `DataConfig` | tokenizer, `max_seq_len=1536`, лимиты длины, `val_ratio`, `seed`, `task_schemas` |
 | `TrainConfig` | quant + lora + batch/accum/epochs/lr/optim/attn + шаги логирования |
 | `EvalConfig` | model_dir, data, report, max_new_tokens, temperature, limit |
 | `load_*_config()` | строгая загрузка YAML (`extra="forbid"`) |
@@ -246,7 +246,7 @@ python scripts/02_train.py --smoke
 | Риск | Митигация |
 |---|---|
 | bitsandbytes не заводится на CUDA 12.x/Windows | проверить импорт до обучения; версия колеса фиксируется в `requirements.lock` |
-| OOM на seq 1024 | fallback: seq 768, r=8, accum 8; smoke ловит до полного запуска |
+| OOM на seq 1536 | fallback: seq 1024, r=8, accum 8; smoke ловит до полного запуска |
 | Субагенты конфликтуют в общих файлах | жёсткое владение файлами + `git diff` перед коммитом |
 | Синтетика шумная | фильтр по схеме + дедуп + ручная выборка 5% |
 | Модель выучила шаблон, а не извлечение | eval на unseen-доменах и мутациях DOM; baseline-эвристика для сравнения |

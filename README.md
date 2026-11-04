@@ -15,6 +15,9 @@
 | Слияние адаптера и конвертация в GGUF | готово |
 | Оценка качества (JSON validity, P/R/F1) | готово |
 | Синтетика через teacher-модель | готово |
+| Сбор реальных страниц по JSON-LD (`08_collect.py`) | готово |
+| Синтетический генератор (`09_make_synthetic.py`) | готово |
+| Датасет и его ограничения | [`docs/DATASET.md`](docs/DATASET.md) |
 | Источники данных и лицензии | [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) |
 
 ## Структура
@@ -22,13 +25,13 @@
 ```
 configs/            data.yaml, train_qlora_4gb.yaml, eval.yaml, tasks.yaml
 src/web2spec/       библиотека пайплайна
-scripts/            01_validate.py … 07_synth.py, ps1-обёртки
-tests/              pytest, без тяжёлых зависимостей
+scripts/            01_validate.py … 09_make_synthetic.py, ps1-обёртки
+tests/              pytest, включая проверки сборщика и синтетики
 examples/demo.jsonl 3 примера для проверки пайплайна без скрапинга
 data/{raw,interim,processed,reports}/
 models/{base,merged,gguf}/
 outputs/runs/       адаптеры, чекпоинты, логи
-docs/               PLAN.md, IMPLEMENTATION_PLAN.md, DATA_SOURCES.md
+docs/               PLAN.md, IMPLEMENTATION_PLAN.md, DATA_SOURCES.md, DATASET.md
 ```
 
 ## Быстрый старт

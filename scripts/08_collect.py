@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--delay", type=float, default=1.5)
     parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=3500,
+        help="compressed HTML budget per sample",
+    )
     return parser.parse_args()
 
 
@@ -46,6 +52,7 @@ def main() -> int:
             sitemap,
             limit=max(50, args.max_total * 10),
             pattern=CATEGORY_PATTERNS[args.category],
+            timeout=60,
         )
         print(f"sitemap {sitemap}: {len(found)} URL")
         seeds.extend(found)
@@ -62,6 +69,7 @@ def main() -> int:
         depth=args.depth,
         delay=args.delay,
         timeout=args.timeout,
+        max_chars=args.max_chars,
     )
     report = stats.as_dict()
     report["seeds"] = seeds

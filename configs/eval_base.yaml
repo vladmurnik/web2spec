@@ -1,0 +1,7 @@
+model_dir: Qwen/Qwen2.5-0.5B-Instruct
+data: data/processed/val.jsonl
+report: data/reports/eval_base.json
+max_new_tokens: 256
+temperature: 0.0
+batch_size: 1
+limit: 30

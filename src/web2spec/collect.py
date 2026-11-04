@@ -685,6 +685,7 @@ def collect(
     depth: int = 2,
     delay: float = 1.5,
     timeout: float = 20.0,
+    max_chars: int = 3_500,
 ) -> CollectStats:
     """Breadth-first polite crawl from seed pages."""
     if category not in CATEGORY_PATTERNS:
@@ -720,7 +721,7 @@ def collect(
                     queue.append((link, level + 1, parent + 1))
                 continue
         try:
-            record = build_record(url, result.html, category=category)
+            record = build_record(url, result.html, category=category, max_chars=max_chars)
         except CollectError as exc:
             stats.skip(exc.code)
             if level < depth:

@@ -221,19 +221,26 @@ def run(cfg: EvalConfig) -> dict[str, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model_dir = (REPO_ROOT / cfg.model_dir).resolve()
+    raw_model = str(cfg.model_dir).replace("\\", "/")
+    model_ref = str(model_dir) if model_dir.exists() else raw_model
     data_path = (REPO_ROOT / cfg.data).resolve()
     report_path = (REPO_ROOT / cfg.report).resolve()
     samples = load_samples(data_path)
     if cfg.limit:
         samples = samples[: cfg.limit]
 
-    tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+    tokenizer = AutoTokenizer.from_pretrained(model_ref)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    from transformers import __version__ as transformers_version
+
+    dtype_kwarg = (
+        "dtype" if int(transformers_version.split(".", 1)[0]) >= 5 else "torch_dtype"
+    )
     model = AutoModelForCausalLM.from_pretrained(
-        str(model_dir),
-        torch_dtype=dtype,
+        model_ref,
+        **{dtype_kwarg: dtype},
         device_map="auto" if torch.cuda.is_available() else "cpu",
         trust_remote_code=False,
     )
