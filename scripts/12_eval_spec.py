@@ -41,6 +41,7 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 
 def score(predictions: dict[str, str], samples: list[Sample], gold: dict[str, Any]) -> dict:
+    json_valid = 0
     spec_valid = 0
     exec_ok = 0
     page_exact = 0
@@ -52,6 +53,8 @@ def score(predictions: dict[str, str], samples: list[Sample], gold: dict[str, An
         parsed = extract_json(raw)
         rows: list[dict[str, Any]] = []
         valid = parsed is not None
+        if valid:
+            json_valid += 1
         executed = False
         error = None
         try:
@@ -93,6 +96,7 @@ def score(predictions: dict[str, str], samples: list[Sample], gold: dict[str, An
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {
         "count": len(samples),
+        "json_valid_rate": json_valid / len(samples) if samples else 0.0,
         "spec_valid_rate": spec_valid / len(samples) if samples else 0.0,
         "exec_success_rate": exec_ok / len(samples) if samples else 0.0,
         "page_exact": page_exact / len(samples) if samples else 0.0,
