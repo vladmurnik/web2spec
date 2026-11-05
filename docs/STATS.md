@@ -96,17 +96,37 @@ Habr в real-spec не попал: не удалось надёжно сопос
 
 | Параметр | Значение |
 |---|---:|
-| Примеров | 1950 |
-| train / val / test | 1663 / 185 / 102 |
-| Полей плана | 7624 |
-| Фактов с evidence | 6064 (79.5%) |
-| Missing-полей | 1560 |
-| Отброшено по длине | 24 |
+| Примеров | 1947 |
+| train / val / test | 1660 / 185 / 102 |
+| Полей плана | 9153 |
+| Фактов с evidence | 5802 (63.4%) |
+| Missing-полей | 3351 |
+| Отброшено по длине | 27 |
 
-Сущности: article 770, job 516, product 406, realestate 258.
+Сущности: article 767, job 516, product 406, realestate 258.
 
 Токены: промпт **p50 1158, p95 1284, max 1435**; итого max 1535 при
 `max_seq_len=1536`. Pipeline: `plan-extract-bootstrap-0.1.0`.
+
+### Reliable-label v2 (используется для обучения)
+
+Bootstrap-датасет содержал шумные метки: факты без точного evidence и поля,
+которых нет на странице. В v2 факт остаётся только если у поля есть скалярное
+значение и `find_evidence` находит точный span в сжатом HTML; недоказуемые поля
+убраны из плана. Для ~35% примеров добавлен один детерминированный negative
+(`rooms` для article/product/job, `salary` для realestate), чтобы модель училась
+честно писать `missing`.
+
+| Параметр | Значение |
+|---|---:|
+| Примеров | 1942 |
+| train / val / test | 1667 / 185 / 90 |
+| Полей плана | 6511 |
+| Фактов с evidence | 5841 (89.7%) |
+| Missing-полей / negatives | 670 |
+| Pipeline | `plan-extract-reliable-0.2.0` |
+
+Пересечение id между split'ами: 0. Gold self-check на test: все метрики 1.0.
 
 ## 5. Модели и артефакты
 
@@ -115,6 +135,11 @@ Habr в real-spec не попал: не удалось надёжно сопос
 | Extract LoRA `outputs/runs/qwen05b-qlora-v1/adapter` | 33.6 MB | обучен |
 | Extract merged `models/merged/qwen2.5-0.5b-ft` | 942 MB | готов |
 | Extract GGUF Q4_K_M | 379.4 MB | готов, llama-server проверен |
+| Plan LoRA `outputs/runs/qwen05b-plan-v1/checkpoint-50` | 33.6 MB | обучен, принят |
+| Plan merged `models/merged/qwen05b-plan` | 942 MB | готов |
+| Plan-extract LoRA v1 `outputs/runs/qwen05b-plan-extract-v1/adapter` | 33.6 MB | провал: шумные метки, strict F1 0.3728; сохранён |
+| Plan-extract LoRA v2 `outputs/runs/qwen05b-plan-extract-v2/adapter` | 33.6 MB | обучен, принят |
+| Plan-extract merged v2 `models/merged/qwen05b-plan-extract-v2` | 942 MB | готов |
 | Spec LoRA `outputs/runs/qwen05b-spec-v1/adapter` | 33.6 MB | обучен на синтетике |
 | Spec merged `models/merged/qwen05b-spec` | 942 MB | готов, но не обобщает |
 | Spec-real `outputs/runs/qwen05b-spec-real/checkpoint-20` | — | обучение остановлено на 32/48 |
@@ -131,6 +156,50 @@ Habr в real-spec не попал: не удалось надёжно сопос
 | Macro F1 | 17.9% | **76.7%** |
 
 По доменам: synthetic 0.95–1.0, Regard 0.80, Lenta 0.67, hh.ru 0.39, Habr 0.17.
+
+### Planner, checkpoint-50
+
+| Метрика | val 250 | test 136 (Habr, unseen) |
+|---|---:|---:|
+| Валидный JSON / план | 1.0 / 0.972 | 1.0 / 1.0 |
+| Entity accuracy | 0.928 | **0.9926** |
+| Scope accuracy | 0.972 | 1.0 |
+| Empty accuracy | 0.8254 | **0.9706** |
+| Exact plan | 0.256 | 0.1618 |
+| Field precision | 0.8911 | 0.8856 |
+| Field recall | 0.7629 | 0.6833 |
+| **Field F1** | **0.8220** | **0.7714** |
+| Required recall | 0.9626 | 1.0 |
+
+Порог P3 (val F1 ≥0.70) и целевой порог test F1 ≥0.75 пройдены. Обучение
+остановлено на checkpoint-50 (80/282 шагов) после eval_loss 0.0065; это
+принятый артефакт. Слабое место — recall на article enrich (description,
+modified_at) и отдельные хосты (hh.ru recall 0.667, regard 0.722, lenta 0.754).
+
+### Plan-extract v2, test 90 (reliable labels, held-out Habr)
+
+| Метрика | Значение |
+|---|---:|
+| Валидный JSON | 94.44% |
+| Валидный FactSet | 94.44% |
+| Strict valid | 90.0% |
+| Exact factset | 90.0% |
+| Fact precision | 95.24% |
+| Fact recall | 91.95% |
+| **Fact F1** | **93.57%** |
+| Evidence rate | 95.24% |
+| Missing accuracy | 91.18% |
+| Coverage | 94.44% |
+
+Ожидалось 87 фактов, предсказано 84, совпало 80; 4 неверных значения, 0 лишних
+фактов, 8 ошибок missing/evidence из 34. Порог P5 (fact F1 ≥0.70 при точном
+evidence) пройден с большим запасом. Обучение: 2 эпохи, QLoRA NF4, seq 1536,
+r16/alpha32, batch1/accum16; train_loss 0.0271, eval_loss 0.0101 (checkpoint-50
+0.0209 → 100 0.0140 → 150 0.0110 → финал 0.0101). Артефакт — v2; v1 оставлен
+как failed prototype.
+
+Ограничение: test состоит только из article/Habr, поэтому перенос на job,
+product, realestate и другие хосты этим прогоном не измерен.
 
 ### Spec, синтетический test 60
 

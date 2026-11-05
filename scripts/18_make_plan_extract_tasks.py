@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from collections import Counter
 from pathlib import Path
@@ -24,6 +25,7 @@ from web2spec.evidence import find_evidence  # noqa: E402
 from web2spec.plan import (  # noqa: E402
     Fact,
     FactSet,
+    PlanField,
     fact_target,
     load_plan,
     validate_factset,
@@ -31,7 +33,7 @@ from web2spec.plan import (  # noqa: E402
 from web2spec.schema import Sample, load_task_schemas, make_id, validate_sample  # noqa: E402
 from web2spec.tokens import build_prompt, load_tokenizer, target_text  # noqa: E402
 
-PIPELINE_VERSION = "plan-extract-bootstrap-0.1.0"
+PIPELINE_VERSION = "plan-extract-reliable-0.2.0"
 SCALAR_TYPES = (str, int, float, bool)
 
 
@@ -63,23 +65,46 @@ def build_sample(
 
     facts: list[Fact] = []
     missing: list[str] = []
+    kept_fields: list[PlanField] = []
     for field in plan.fields:
         value = target.get(field.name)
-        evidence = None
-        if isinstance(value, SCALAR_TYPES):
-            evidence = find_evidence(plan_sample.input_html, value, key=field.name)
+        if not isinstance(value, SCALAR_TYPES):
+            continue
+        evidence = find_evidence(plan_sample.input_html, value, key=field.name)
         if evidence is None:
-            missing.append(field.name)
             continue
         facts.append(Fact(name=field.name, value=value, evidence=evidence))
+        kept_fields.append(field)
         stats["facts"] += 1
 
+    negative_fields: list[PlanField] = []
+    negative_name = "salary" if plan.entity == "realestate" else "rooms"
+    existing = {field.name for field in kept_fields}
+    if (
+        random.Random(make_id("neg", plan_sample.id)).random() < 0.35
+        and negative_name not in existing
+        and len(kept_fields) < 12
+        and not isinstance(target.get(negative_name), SCALAR_TYPES)
+    ):
+        negative_fields.append(
+            PlanField(
+                name=negative_name,
+                why="поле для выполнения задачи",
+                required=False,
+                kind="number",
+            )
+        )
+        missing.append(negative_name)
+
+    modified_plan = plan.model_copy(deep=True)
+    modified_plan.fields = kept_fields + negative_fields
+    stats["fields"] = len(modified_plan.fields)
     stats["missing"] = len(missing)
     if not facts and not missing:
         return None, stats
 
     factset = FactSet(facts=facts, missing=missing)
-    validate_factset(factset, plan, plan_sample.input_html)
+    validate_factset(factset, modified_plan, plan_sample.input_html)
     record = {
         "id": make_id("pex", plan_sample.id),
         "group_id": plan_sample.group_id,
@@ -93,7 +118,7 @@ def build_sample(
             "source_url": plan_sample.meta.source_url,
             "n_tokens": None,
             "pipeline_version": PIPELINE_VERSION,
-            "plan": plan.model_dump(mode="json"),
+            "plan": modified_plan.model_dump(mode="json"),
         },
     }
     return record, stats

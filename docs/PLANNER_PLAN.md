@@ -1,6 +1,6 @@
 # План следующего шага: task-conditioned planner
 
-**Статус:** 05.11.2026. P0–P2 выполнены, P3 (обучение planner) запущен. Данные: 658 страниц → 2632 плана, splits 2246/250/136, test — незнакомый Habr. Smoke пройден, checkpoint-50: eval_loss 0.0065. Финальные метрики появятся после завершения обучения и eval.
+**Статус:** 05.11.2026. P0–P5 выполнены: planner принят на checkpoint-50 (val field F1 **0.8220**, test 136 **0.7714**). Plan-conditioned extractor v2 обучен на reliable-label датасете и принят: test 90 (held-out Habr) fact F1 **0.9357**, evidence rate **0.9524**, missing accuracy **0.9118**, JSON valid 0.9444 — порог P5 (fact F1 ≥ 0.70) пройден с запасом. Следующий этап — P6 (runtime-каскад + repair buffer).
 
 **Связанные документы:** [`MASTER_PLAN.md`](MASTER_PLAN.md) — общий roadmap; [`STATS.md`](STATS.md) — текущие данные; [`SPEC_TRACK.md`](SPEC_TRACK.md) — результаты spec-трека.
 
@@ -235,13 +235,17 @@ HTML-фрагмент:
 
 После planner'а нужен второй adapter, иначе план не влияет на извлечение.
 
-- adapter: `outputs/runs/qwen05b-plan-extract-v1`;
+- adapter v2: `outputs/runs/qwen05b-plan-extract-v2`, merged `models/merged/qwen05b-plan-extract-v2`;
+- v1 (`qwen05b-plan-extract-v1`) сохранён как failed prototype: шумные метки давали 0.3728 strict F1;
 - вход: `CollectionPlan` + HTML;
 - выход: `FactSet`;
 - target строится из gold extraction: значения ищутся в HTML, evidence = точная подстрока;
+- reliable-label v2: факт остаётся только если у поля есть скалярное значение и `find_evidence` находит точный span; недоказуемые поля убраны из плана; добавлен контролируемый negative для ~35% примеров (`rooms` для article/product/job, `salary` для realestate);
 - если поле плана отсутствует на странице — в `missing`;
-- 2–3 тыс. примеров, seq 1536, те же гиперпараметры;
+- 1942 примера (train 1667 / val 185 / test 90), 6511 полей, 5841 факт с evidence (89.7%), 670 missing/negatives, seq 1536;
 - eval: fact F1, evidence rate, missing accuracy.
+
+Результат v2 на test 90: fact F1 **0.9357** (precision 0.9524 / recall 0.9195), evidence rate **0.9524**, missing accuracy **0.9118**, JSON valid **0.9444**, exact factset **0.90**. Ошибки: 4 неверных значения и 5 невалидных ответов из 90.
 
 Без этого этапа planner остаётся «советником», а extraction — фиксированным.
 
@@ -307,7 +311,7 @@ Confidence без logits оцениваем косвенно: schema validity, �
 | P2 | Расширение до 2–2.5 тыс. | `data/plan/{train,val,test}.jsonl` | покрыты 5 категорий, 3 хоста в test |
 | P3 | Smoke + обучение planner | adapter `qwen05b-plan-v1` | val F1 ≥ 0.75 |
 | P4 | Eval + error analysis | `data/reports/eval_plan.json` | отчёт с примерами ошибок |
-| P5 | Plan-conditioned extractor | adapter `qwen05b-plan-extract-v1` | fact F1 ≥ 0.70 |
+| P5 | Plan-conditioned extractor | adapter `qwen05b-plan-extract-v2` | fact F1 ≥ 0.70 — **выполнено: 0.9357** |
 | P6 | Runtime + repair buffer | `scripts/18_serve_plan.py` | 50 задач, success ≥ 70% |
 
 Обучение на P3/P5 запускается только после отдельного разрешения.

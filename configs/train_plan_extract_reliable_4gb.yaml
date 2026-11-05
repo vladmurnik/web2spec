@@ -1,0 +1,41 @@
+base_model: Qwen/Qwen2.5-0.5B-Instruct
+output_dir: outputs/runs/qwen05b-plan-extract-v2
+seed: 42
+max_seq_len: 1536
+
+quant:
+  load_in_4bit: true
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  bias: none
+
+batch_size: 1
+grad_accum: 16
+epochs: 2
+lr: 0.0002
+weight_decay: 0.01
+scheduler: cosine
+warmup_ratio: 0.03
+optim: paged_adamw_8bit
+max_grad_norm: 1.0
+gradient_checkpointing: true
+attn_implementation: sdpa
+
+logging_steps: 10
+save_steps: 50
+eval_steps: 50
+early_stopping_patience: 2

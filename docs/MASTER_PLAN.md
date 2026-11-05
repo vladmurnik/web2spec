@@ -1,6 +1,6 @@
 # web2spec — общий план развития
 
-**Статус:** 2026-11-04. Документ фиксирует текущее состояние и оба трека: уже обученный extraction и следующий шаг — task-conditioned planner. Детальный план следующего шага — в [`PLANNER_PLAN.md`](PLANNER_PLAN.md). Исторические документы [`PLAN.md`](PLAN.md) и [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) не переписаны, но их решения по 0.5B, 4 GB и QLoRA остаются в силе.
+**Статус:** 2026-11-05. Документ фиксирует текущее состояние и оба трека: уже обученный extraction и task-conditioned planner + plan-conditioned extractor. Детальный план следующего шага — в [`PLANNER_PLAN.md`](PLANNER_PLAN.md). Исторические документы [`PLAN.md`](PLAN.md) и [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) не переписаны, но их решения по 0.5B, 4 GB и QLoRA остаются в силе.
 
 ---
 
@@ -16,7 +16,9 @@
 | Extraction eval | готово | JSON 98.4%, exact 42.6%, micro F1 84.3% |
 | Spec-трек, синтетика | обучено, но не переносится | adapter/merged есть, real F1 0 |
 | Spec-трек, реальные данные | данные готовы, обучение остановлено | 157 примеров, checkpoint-20 |
-| Planner / task-conditioned extraction | не начато | этот план |
+| Planner / task-conditioned extraction | готово | adapter v1 + extractor v2, test fact F1 0.9357 |
+| Plan-conditioned extractor v2 | готово | reliable-label датасет 1942, merged 942 MB |
+| Runtime-каскад / repair buffer | следующий этап | P6 |
 
 ### Честная оценка extraction
 
@@ -69,15 +71,15 @@
 
 HTML → JSON по фиксированной схеме. Остаётся production-компонентом для известных типов страниц. Не трогаем без причины: adapter, merged и GGUF уже проверены.
 
-### Track B — task-conditioned planner (следующий)
+### Track B — task-conditioned planner (готов)
 
-Задача + сэмпл сайта → `CollectionPlan`. План определяет, **что** собирать. Extraction выполняется отдельно, уже по плану. Это снимает главное ограничение текущей модели: она не может решить, что важно, потому что её учили только фиксированным полям.
+Задача + сэмпл сайта → `CollectionPlan`. План определяет, **что** собирать. Extraction выполняется отдельно, уже по плану. Это снимает главное ограничение текущей модели: она не может решить, что важно, потому что её учили только фиксированным полям. Принят checkpoint-50: val field F1 0.8220, test 136 (unseen Habr) 0.7714.
 
-### Track C — plan-conditioned extractor (после B)
+### Track C — plan-conditioned extractor (готов)
 
-Тот же HTML, но target — facts с именами из плана, а не глобальная схема. Нужен, чтобы план действительно управлял извлечением, а не оставался текстом.
+Тот же HTML, но target — facts с именами из плана, а не глобальная схема. Нужен, чтобы план действительно управлял извлечением, а не оставался текстом. v2 на reliable-label данных: test 90 fact F1 0.9357, evidence rate 0.9524, missing accuracy 0.9118. Ограничение — test только article/Habr.
 
-### Track D — runtime (после B/C)
+### Track D — runtime (следующий)
 
 Каскад: planner → extractor → validator → teacher fallback. Ошибки сохраняются в буфер для дообучения.
 
@@ -91,13 +93,13 @@ HTML → JSON по фиксированной схеме. Остаётся produ
 
 | Этап | Содержание | Критерий готовности | Статус |
 |---|---|---|---|
-| M0 | Схема `CollectionPlan` / `Fact`, тесты | схема валидирует примеры, есть negative-кейсы | не начато |
-| M1 | Банк задач и teacher-разметка 500 планов | 500 планов, 0 ошибок схемы, ручной аудит 50 | не начато |
-| M2 | Расширение до 2–3 тыс. планов | покрыты 5 категорий, 3–5 задач на страницу | не начато |
-| M3 | Обучение planner-адаптера | val plan F1 ≥ 0.75, entity ≥ 0.85 | не начато |
-| M4 | Eval на unseen hosts/tasks | end-to-end fact F1 ≥ 0.60 | не начато |
-| M5 | Plan-conditioned extractor | F1 ≥ 0.70 на своих хостах | не начато |
-| M6 | Runtime-каскад + repair buffer | 50 задач, success ≥ 70% | не начато |
+| M0 | Схема `CollectionPlan` / `Fact`, тесты | схема валидирует примеры, есть negative-кейсы | выполнено |
+| M1 | Банк задач и teacher-разметка 500 планов | 500 планов, 0 ошибок схемы, ручной аудит 50 | выполнено |
+| M2 | Расширение до 2–3 тыс. планов | покрыты 5 категорий, 3–5 задач на страницу | выполнено |
+| M3 | Обучение planner-адаптера | val plan F1 ≥ 0.75, entity ≥ 0.85 | выполнено: F1 0.8220 |
+| M4 | Eval на unseen hosts/tasks | end-to-end fact F1 ≥ 0.60 | частично: test F1 0.7714/0.9357 на Habr, другие хосты не покрыты |
+| M5 | Plan-conditioned extractor | F1 ≥ 0.70 на своих хостах | выполнено: fact F1 0.9357 |
+| M6 | Runtime-каскад + repair buffer | 50 задач, success ≥ 70% | следующий этап |
 | M7 | Опционально: 1.5B Coder / code track | pass@1 на execution-фикстурах | заморожено |
 
 Каждый этап заканчивается отчётом и commit'ом. Обучение запускается только после явного разрешения.
