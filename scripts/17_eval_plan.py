@@ -31,6 +31,48 @@ def _scope(plan: CollectionPlan) -> tuple[bool, bool]:
     return plan.pagination, plan.detail_pages
 
 
+def _aggregate(details: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    buckets: dict[str, dict[str, Any]] = {}
+    counters = (
+        "json_valid",
+        "plan_valid",
+        "entity_ok",
+        "scope_ok",
+        "exact",
+        "matched_fields",
+        "predicted_fields",
+        "expected_fields",
+        "required_total",
+        "required_found",
+    )
+    for row in details:
+        name = str(row.get(key) or "unknown")
+        bucket = buckets.setdefault(name, {"count": 0, **{item: 0 for item in counters}})
+        bucket["count"] += 1
+        for item in counters:
+            bucket[item] += int(row.get(item, 0))
+    for bucket in buckets.values():
+        count = bucket["count"]
+        matched = bucket["matched_fields"]
+        predicted = bucket["predicted_fields"]
+        expected = bucket["expected_fields"]
+        precision = matched / predicted if predicted else 0.0
+        recall = matched / expected if expected else 0.0
+        bucket["field_precision"] = precision
+        bucket["field_recall"] = recall
+        bucket["field_f1"] = (
+            2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        )
+        for item in ("json_valid", "plan_valid", "entity_ok", "scope_ok", "exact"):
+            bucket[f"{item}_rate"] = bucket[item] / count if count else 0.0
+        bucket["required_recall"] = (
+            bucket["required_found"] / bucket["required_total"]
+            if bucket["required_total"]
+            else None
+        )
+    return buckets
+
+
 def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
     json_valid = 0
     plan_valid = 0
@@ -83,12 +125,21 @@ def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
             {
                 "id": sample.id,
                 "group_id": sample.group_id,
+                "expected_entity": expected.entity,
                 "json_valid": parsed is not None,
                 "plan_valid": plan is not None,
                 "entity_ok": row_entity,
                 "scope_ok": row_scope,
                 "exact": row_exact,
-                "expected_entity": expected.entity,
+                "matched_fields": len(expected_names & predicted_names),
+                "predicted_fields": len(predicted_names),
+                "expected_fields": len(expected_names),
+                "required_total": sum(1 for field in expected.fields if field.required),
+                "required_found": sum(
+                    1
+                    for field in expected.fields
+                    if field.required and field.name in predicted_names
+                ),
                 "predicted_entity": plan.entity if plan else None,
                 "missing_required": sorted(
                     field.name
@@ -116,6 +167,8 @@ def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
         "field_recall": recall,
         "field_f1": f1,
         "required_recall": required_found / required_total if required_total else None,
+        "by_group": _aggregate(details, "group_id"),
+        "by_entity": _aggregate(details, "expected_entity"),
         "details": details,
     }
 

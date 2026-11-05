@@ -81,6 +81,54 @@ def values_match(predicted: Any, gold: Any) -> bool:
     return _norm(predicted) == _norm(gold)
 
 
+def _aggregate(details: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    buckets: dict[str, dict[str, Any]] = {}
+    counters = (
+        "json_valid",
+        "factset_valid",
+        "strict_valid",
+        "exact",
+        "matched",
+        "expected",
+        "predicted",
+        "wrong_values",
+        "evidence_ok",
+        "evidence_total",
+        "missing_ok",
+        "missing_total",
+        "extra_fact_count",
+        "coverage",
+    )
+    for row in details:
+        name = str(row.get(key) or "unknown")
+        bucket = buckets.setdefault(name, {"count": 0, **{item: 0.0 for item in counters}})
+        bucket["count"] += 1
+        for item in counters:
+            bucket[item] += float(row.get(item, 0))
+    for bucket in buckets.values():
+        count = bucket["count"]
+        matched = bucket["matched"]
+        expected = bucket["expected"]
+        predicted = bucket["predicted"]
+        precision = matched / predicted if predicted else 0.0
+        recall = matched / expected if expected else 0.0
+        bucket["fact_precision"] = precision
+        bucket["fact_recall"] = recall
+        bucket["fact_f1"] = (
+            2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        )
+        bucket["evidence_rate"] = (
+            bucket["evidence_ok"] / bucket["evidence_total"] if bucket["evidence_total"] else None
+        )
+        bucket["missing_accuracy"] = (
+            bucket["missing_ok"] / bucket["missing_total"] if bucket["missing_total"] else None
+        )
+        bucket["coverage"] = bucket["coverage"] / count if count else 0.0
+        for item in ("json_valid", "factset_valid", "strict_valid", "exact"):
+            bucket[f"{item}_rate"] = bucket[item] / count if count else 0.0
+    return buckets
+
+
 def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
     json_valid = factset_valid = strict_valid = exact = 0
     expected = matched = predicted_total = wrong = extra = 0
@@ -137,26 +185,40 @@ def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
                     missing_ok += 1
 
         covered = len((set(pred_facts) | pred_missing) & plan_names)
-        coverage_sum += covered / len(plan_names) if plan_names else 0.0
+        row_coverage = covered / len(plan_names) if plan_names else 0.0
+        coverage_sum += row_coverage
         row_exact = factset is not None and factset == gold
         exact += int(row_exact)
+        row_matched = sum(
+            1
+            for name, fact in pred_facts.items()
+            if name in gold_facts and values_match(fact.value, gold_facts[name].value)
+        )
         details.append(
             {
                 "id": sample.id,
                 "group_id": sample.group_id,
+                "entity": plan.entity,
                 "json_valid": parsed is not None,
                 "factset_valid": factset is not None,
                 "strict_valid": strict,
                 "exact": row_exact,
+                "coverage": row_coverage,
+                "expected": len(gold_facts),
+                "predicted": len(pred_facts),
                 "expected_facts": len(gold_facts),
                 "predicted_facts": len(pred_facts),
-                "matched": sum(
-                    1
-                    for name, fact in pred_facts.items()
-                    if name in gold_facts and values_match(fact.value, gold_facts[name].value)
+                "matched": row_matched,
+                "wrong_values": len(pred_facts) - row_matched,
+                "evidence_ok": sum(
+                    1 for fact in pred_facts.values() if fact.evidence in sample.input_html
                 ),
+                "evidence_total": len(pred_facts),
                 "missing_expected": sorted(gold_missing),
                 "missing_predicted": sorted(pred_missing),
+                "missing_ok": len(gold_missing & pred_missing),
+                "missing_total": len(gold_missing),
+                "extra_fact_count": len(set(pred_facts) - plan_names),
                 "extra_facts": sorted(set(pred_facts) - plan_names),
                 "error": error,
             }
@@ -183,6 +245,8 @@ def score(predictions: dict[str, str], samples: list[Sample]) -> dict[str, Any]:
         "predicted": predicted_total,
         "wrong_values": wrong,
         "extra_facts": extra,
+        "by_group": _aggregate(details, "group_id"),
+        "by_entity": _aggregate(details, "entity"),
         "details": details,
     }
 
