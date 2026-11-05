@@ -21,8 +21,8 @@ import jsonschema
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-TaskName = Literal["extract", "spec", "qa"]
-TASKS: tuple[str, ...] = ("extract", "spec", "qa")
+TaskName = Literal["extract", "spec", "qa", "plan", "plan_extract"]
+TASKS: tuple[str, ...] = ("extract", "spec", "qa", "plan", "plan_extract")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,63}$")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -52,6 +52,7 @@ class Meta(BaseModel):
     source_url: str | None = None
     n_tokens: int | None = Field(default=None, ge=0)
     pipeline_version: str = "0.1.0"
+    plan: dict[str, Any] | None = None
 
 
 class Sample(BaseModel):

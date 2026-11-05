@@ -1,0 +1,13 @@
+paths:
+  processed: data/plan
+  reports: data/reports
+
+tokenizer: Qwen/Qwen2.5-0.5B-Instruct
+max_seq_len: 1536
+min_chars: 50
+max_chars: 200000
+compress_max_chars: 3500
+val_ratio: 0.1
+seed: 42
+dedup: true
+task_schemas: configs/tasks.yaml

@@ -45,6 +45,97 @@ spec:
           minimum: 1
           maximum: 50
 
+plan:
+  type: object
+  additionalProperties: false
+  required: [plan]
+  properties:
+    plan:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - goal
+        - entity
+        - entry
+        - fields
+        - filters
+        - pagination
+        - detail_pages
+        - dedup_key
+        - stop_conditions
+      properties:
+        version:
+          type: integer
+          const: 1
+        goal:
+          type: string
+          minLength: 5
+          maxLength: 300
+        entity:
+          type: string
+          pattern: "^([a-z][a-z0-9_]{1,39}|none)$"
+        entry:
+          type: string
+          enum: [listing, detail, search, sitemap]
+        fields:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, why, required, kind]
+            properties:
+              name:
+                type: string
+                pattern: "^[a-z][a-z0-9_]{1,39}$"
+              why:
+                type: string
+                minLength: 3
+                maxLength: 200
+              required:
+                type: boolean
+              kind:
+                type: string
+                enum: [text, number, date, url, bool, null]
+        filters:
+          type: object
+          maxProperties: 8
+          additionalProperties:
+            type: string
+            minLength: 1
+        pagination:
+          type: boolean
+        detail_pages:
+          type: boolean
+        dedup_key:
+          type: string
+          enum: [url, id, sku, title]
+        stop_conditions:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+      allOf:
+        - if:
+            properties:
+              entity:
+                const: none
+          then:
+            properties:
+              fields:
+                maxItems: 0
+              pagination:
+                const: false
+              detail_pages:
+                const: false
+          else:
+            properties:
+              fields:
+                minItems: 1
+
 qa:
   type: object
   additionalProperties: false
@@ -53,3 +144,32 @@ qa:
     answer:
       type: string
       minLength: 1
+
+plan_extract:
+  type: object
+  additionalProperties: false
+  required: [facts, missing]
+  properties:
+    facts:
+      type: array
+      maxItems: 12
+      items:
+        type: object
+        additionalProperties: false
+        required: [name, value, evidence]
+        properties:
+          name:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,39}$"
+          value:
+            type: [string, number, boolean, "null"]
+          evidence:
+            type: string
+            minLength: 1
+            maxLength: 1000
+    missing:
+      type: array
+      maxItems: 12
+      items:
+        type: string
+        pattern: "^[a-z][a-z0-9_]{1,39}$"

@@ -20,6 +20,21 @@ SYSTEM_PROMPT = (
     "Если поля нет на странице — используй null."
 )
 
+PLAN_SYSTEM_PROMPT = (
+    "Ты планировщик сбора данных. По задаче пользователя и образцу страницы "
+    "верни ТОЛЬКО валидный JSON CollectionPlan. Не добавляй CSS-селекторы, "
+    "XPath или код. Поля должны быть семантическими и соответствовать задаче. "
+    'Если на странице нет данных для задачи, верни entity="none" и пустые fields.'
+)
+
+PLAN_EXTRACT_SYSTEM_PROMPT = (
+    "Ты извлекаешь факты из HTML по заданному CollectionPlan. "
+    "Верни ТОЛЬКО валидный JSON FactSet с ключами facts и missing. "
+    "Для каждого факта evidence — точная подстрока HTML. "
+    "Поля плана, которых нет на странице, перечисли в missing. "
+    "Не выдумывай значения и не добавляй поля вне плана."
+)
+
 ASSISTANT_SUFFIX = "<|im_start|>assistant\n"
 
 
@@ -27,13 +42,54 @@ def build_user_message(sample: Sample) -> str:
     return f"{sample.instruction}\n\nHTML:\n{sample.input_html}"
 
 
+def build_plan_user_message(sample: Sample) -> str:
+    source = sample.meta.source_url or "unknown"
+    return f"Задача: {sample.instruction}\nСайт: {source}\nHTML-фрагмент:\n{sample.input_html}"
+
+
+def build_plan_prompt(sample: Sample, tokenizer: Any) -> str:
+    """Render the planner prompt; the target is a semantic CollectionPlan."""
+
+    messages = [
+        {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+        {"role": "user", "content": build_plan_user_message(sample)},
+    ]
+    return _render_messages(messages, tokenizer)
+
+
+def build_plan_extract_user_message(sample: Sample) -> str:
+    plan = sample.meta.plan
+    if not isinstance(plan, dict) or not plan:
+        raise ValueError(f"sample {sample.id}: plan_extract requires meta.plan")
+    plan_json = json.dumps(plan, ensure_ascii=False, separators=(",", ":"))
+    return f"План:\n{plan_json}\n\nЗадача: {sample.instruction}\n\nHTML:\n{sample.input_html}"
+
+
+def build_plan_extract_prompt(sample: Sample, tokenizer: Any) -> str:
+    """Render the plan-conditioned extraction prompt."""
+
+    messages = [
+        {"role": "system", "content": PLAN_EXTRACT_SYSTEM_PROMPT},
+        {"role": "user", "content": build_plan_extract_user_message(sample)},
+    ]
+    return _render_messages(messages, tokenizer)
+
+
 def build_prompt(sample: Sample, tokenizer: Any) -> str:
     """Render the chat prompt exactly as it will be seen during training."""
 
+    if sample.task == "plan":
+        return build_plan_prompt(sample, tokenizer)
+    if sample.task == "plan_extract":
+        return build_plan_extract_prompt(sample, tokenizer)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(sample)},
     ]
+    return _render_messages(messages, tokenizer)
+
+
+def _render_messages(messages: list[dict[str, str]], tokenizer: Any) -> str:
     apply_template = getattr(tokenizer, "apply_chat_template", None)
     if callable(apply_template):
         try:

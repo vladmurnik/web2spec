@@ -97,5 +97,5 @@ def test_length_stats_empty():
 
 
 def test_task_schemas_are_loaded():
-    assert set(TASK_SCHEMAS) == {"extract", "spec", "qa"}
+    assert set(TASK_SCHEMAS) == {"extract", "spec", "qa", "plan", "plan_extract"}
     assert TASK_SCHEMAS["spec"]["required"] == ["version", "fields"]
