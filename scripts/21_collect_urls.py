@@ -36,6 +36,13 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from web2spec.collect import RobotsCache, fetch  # noqa: E402
 from web2spec.eval import extract_json  # noqa: E402
 from web2spec.html_compress import compress_html  # noqa: E402
+from web2spec.llama_runtime import (  # noqa: E402
+    DEFAULT_DEVICE,
+    DEFAULT_EXTRACTOR,
+    DEFAULT_PLANNER,
+    generate_batch,
+    is_gguf,
+)
 from web2spec.plan import (  # noqa: E402
     FactSet,
     PlanError,
@@ -48,6 +55,7 @@ from web2spec.schema import Meta, Sample, make_id  # noqa: E402
 from web2spec.tokens import (  # noqa: E402
     build_plan_extract_prompt,
     build_plan_prompt,
+    build_prompt_text,
     load_tokenizer,
 )
 
@@ -278,7 +286,39 @@ def _load_causal(model_dir: str) -> tuple[Any, Any, Any]:
     return model, tokenizer, torch
 
 
-def _generate(
+def _generate_gguf(
+    items: list[tuple[str, str]],
+    samples: list[Sample],
+    model_path: str,
+    max_new_tokens: int,
+    label: str,
+    *,
+    llama_server: str | None,
+    device: str | None,
+    context: int,
+    startup_timeout: float,
+    request_timeout: float,
+) -> dict[str, str]:
+    """Run one GGUF model through llama.cpp; no torch or tokenizer needed."""
+
+    prompts = [
+        (url, build_prompt_text(sample))
+        for sample, (url, _) in zip(samples, items, strict=True)
+    ]
+    return generate_batch(
+        prompts,
+        model_path,
+        max_new_tokens=max_new_tokens,
+        label=label,
+        server=llama_server,
+        device=device,
+        context=context,
+        startup_timeout=startup_timeout,
+        request_timeout=request_timeout,
+    )
+
+
+def _generate_hf(
     items: list[tuple[str, str]],
     samples: list[Sample],
     model_dir: str,
@@ -286,7 +326,7 @@ def _generate(
     max_new_tokens: int,
     label: str,
 ) -> dict[str, str]:
-    """Run one model over a batch of ``(url, html)`` items, keyed by URL."""
+    """Run one merged fp16 model through transformers (fallback backend)."""
 
     model, tokenizer, torch = _load_causal(model_dir)
     output: dict[str, str] = {}
@@ -320,8 +360,54 @@ def _generate(
     return output
 
 
+def _generate(
+    items: list[tuple[str, str]],
+    samples: list[Sample],
+    model_dir: str,
+    build_prompt,
+    max_new_tokens: int,
+    label: str,
+    *,
+    backend: str = "auto",
+    llama_server: str | None = None,
+    device: str | None = DEFAULT_DEVICE,
+    context: int = 8192,
+    startup_timeout: float = 240.0,
+    request_timeout: float = 300.0,
+) -> dict[str, str]:
+    """Run one model over a batch of ``(url, html)`` items, keyed by URL."""
+
+    use_gguf = backend == "gguf" or (backend == "auto" and is_gguf(model_dir))
+    if use_gguf:
+        return _generate_gguf(
+            items,
+            samples,
+            model_dir,
+            max_new_tokens,
+            label,
+            llama_server=llama_server,
+            device=device,
+            context=context,
+            startup_timeout=startup_timeout,
+            request_timeout=request_timeout,
+        )
+    return _generate_hf(
+        items, samples, model_dir, build_prompt, max_new_tokens, label
+    )
+
+
 def generate_plans(
-    items: list[tuple[str, str]], model_dir: str, max_new_tokens: int, task: str
+    items: list[tuple[str, str]],
+    model_dir: str,
+    max_new_tokens: int,
+    task: str,
+    *,
+    backend: str = "auto",
+    llama_server: str | None = None,
+    device: str | None = DEFAULT_DEVICE,
+    context: int = 8192,
+    startup_timeout: float = 240.0,
+    request_timeout: float = 300.0,
 ) -> dict[str, str]:
     """Planner pass over prepared pages; returns plan JSON text per URL."""
 
@@ -338,7 +424,18 @@ def generate_plans(
         for url, html in items
     ]
     return _generate(
-        items, samples, model_dir, build_plan_prompt, max_new_tokens, "plan"
+        items,
+        samples,
+        model_dir,
+        build_plan_prompt,
+        max_new_tokens,
+        "plan",
+        backend=backend,
+        llama_server=llama_server,
+        device=device,
+        context=context,
+        startup_timeout=startup_timeout,
+        request_timeout=request_timeout,
     )
 
 
@@ -347,6 +444,13 @@ def generate_facts(
     model_dir: str,
     max_new_tokens: int,
     task: str,
+    *,
+    backend: str = "auto",
+    llama_server: str | None = None,
+    device: str | None = DEFAULT_DEVICE,
+    context: int = 8192,
+    startup_timeout: float = 240.0,
+    request_timeout: float = 300.0,
 ) -> dict[str, str]:
     """Extractor pass over pages that have a valid plan; FactSet JSON per URL."""
 
@@ -368,7 +472,18 @@ def generate_facts(
         for url, html, plan in items
     ]
     return _generate(
-        pair_items, samples, model_dir, build_plan_extract_prompt, max_new_tokens, "fact"
+        pair_items,
+        samples,
+        model_dir,
+        build_plan_extract_prompt,
+        max_new_tokens,
+        "fact",
+        backend=backend,
+        llama_server=llama_server,
+        device=device,
+        context=context,
+        startup_timeout=startup_timeout,
+        request_timeout=request_timeout,
     )
 
 
@@ -426,13 +541,34 @@ def main(argv: list[str] | None = None) -> int:
         help="куда записать JSON-отчёт",
     )
     parser.add_argument(
-        "--planner", type=str, default=str(REPO_ROOT / "models/merged/qwen05b-plan")
+        "--planner", type=str, default=str(DEFAULT_PLANNER)
     )
     parser.add_argument(
         "--extractor",
         type=str,
-        default=str(REPO_ROOT / "models/merged/qwen05b-plan-extract-v2"),
+        default=str(DEFAULT_EXTRACTOR),
     )
+    parser.add_argument(
+        "--backend",
+        choices=("auto", "gguf", "hf"),
+        default="auto",
+        help="auto: GGUF через llama.cpp, иначе transformers; по умолчанию Q4_K_M",
+    )
+    parser.add_argument(
+        "--llama-server",
+        type=str,
+        default=None,
+        help="путь к llama-server (или WEB2SPEC_LLAMA_SERVER)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=DEFAULT_DEVICE,
+        help="устройство llama.cpp, например Vulkan0; пусто = авто/CPU",
+    )
+    parser.add_argument("--context", type=int, default=8192)
+    parser.add_argument("--startup-timeout", type=float, default=240.0)
+    parser.add_argument("--request-timeout", type=float, default=300.0)
     parser.add_argument("--max-pages", type=int, default=20)
     parser.add_argument("--max-chars", type=int, default=12_000)
     parser.add_argument("--timeout", type=float, default=20.0)
@@ -496,7 +632,16 @@ def main(argv: list[str] | None = None) -> int:
     if items:
         try:
             plan_raws = generate_plans(
-                items, args.planner, args.plan_max_new_tokens, task
+                items,
+                args.planner,
+                args.plan_max_new_tokens,
+                task,
+                backend=args.backend,
+                llama_server=args.llama_server,
+                device=args.device or None,
+                context=args.context,
+                startup_timeout=args.startup_timeout,
+                request_timeout=args.request_timeout,
             )
         except Exception as exc:  # noqa: BLE001 - report, never abort the batch
             plan_batch_error = f"planner failed: {exc}"
@@ -514,7 +659,16 @@ def main(argv: list[str] | None = None) -> int:
     if fact_items:
         try:
             fact_raws = generate_facts(
-                fact_items, args.extractor, args.fact_max_new_tokens, task
+                fact_items,
+                args.extractor,
+                args.fact_max_new_tokens,
+                task,
+                backend=args.backend,
+                llama_server=args.llama_server,
+                device=args.device or None,
+                context=args.context,
+                startup_timeout=args.startup_timeout,
+                request_timeout=args.request_timeout,
             )
         except Exception as exc:  # noqa: BLE001 - report, never abort the batch
             fact_batch_error = f"extractor failed: {exc}"

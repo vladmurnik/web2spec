@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "web2spec"
-version = "0.1.0"
-description = "QLoRA fine-tuning of Qwen2.5-0.5B for HTML → structured data extraction on 4 GB VRAM"
+version = "0.2.0"
+description = "Local task -> web search -> structured facts pipeline for 4 GB VRAM"
 requires-python = ">=3.12"
 dependencies = [
   "torch>=2.4",
@@ -21,6 +21,9 @@ dependencies = [
   "lxml>=5.2",
   "tqdm>=4.66",
 ]
+
+[project.scripts]
+web2spec = "web2spec.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]

@@ -115,12 +115,18 @@ def _defaults() -> dict[str, Any]:
         "llm_provider": _env("WEB2SPEC_LLM_PROVIDER", "ollama"),
         "language": _env("WEB2SPEC_LANGUAGE", "ru"),
         "planner": _env(
-            "WEB2SPEC_PLANNER", str(REPO_ROOT / "models/merged/qwen05b-plan")
+            "WEB2SPEC_PLANNER", str(search_cli.DEFAULT_PLANNER)
         ),
         "extractor": _env(
             "WEB2SPEC_EXTRACTOR",
-            str(REPO_ROOT / "models/merged/qwen05b-plan-extract-v2"),
+            str(search_cli.DEFAULT_EXTRACTOR),
         ),
+        "backend": _env("WEB2SPEC_BACKEND", "auto"),
+        "llama_server": os.environ.get("WEB2SPEC_LLAMA_SERVER") or None,
+        "device": _env("WEB2SPEC_LLAMA_DEVICE", search_cli.DEFAULT_DEVICE),
+        "context": int(_env("WEB2SPEC_CONTEXT", "8192")),
+        "startup_timeout": float(_env("WEB2SPEC_STARTUP_TIMEOUT", "240")),
+        "request_timeout": float(_env("WEB2SPEC_REQUEST_TIMEOUT", "300")),
         "max_chars": int(_env("WEB2SPEC_MAX_CHARS", "12000")),
         "timeout": float(_env("WEB2SPEC_TIMEOUT", "20")),
         "delay": float(_env("WEB2SPEC_DELAY", "1.0")),
@@ -139,6 +145,12 @@ def _namespace(
     planner: str,
     extractor: str,
     html_dir: str | None,
+    backend: str,
+    llama_server: str | None,
+    device: str | None,
+    context: int,
+    startup_timeout: float,
+    request_timeout: float,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         task=task,
@@ -150,6 +162,12 @@ def _namespace(
         planner=planner,
         extractor=extractor,
         html_dir=Path(html_dir) if html_dir else None,
+        backend=backend,
+        llama_server=llama_server,
+        device=device,
+        context=context,
+        startup_timeout=startup_timeout,
+        request_timeout=request_timeout,
         plan_max_new_tokens=320,
         fact_max_new_tokens=384,
         collector_timeout=3600.0,
@@ -260,6 +278,12 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
         planner=cfg["planner"],
         extractor=cfg["extractor"],
         html_dir=cfg["html_dir"],
+        backend=cfg["backend"],
+        llama_server=cfg["llama_server"],
+        device=cfg["device"],
+        context=cfg["context"],
+        startup_timeout=cfg["startup_timeout"],
+        request_timeout=cfg["request_timeout"],
     )
     report, error = search_cli._run_collector(ns, urls)
     if error is not None:
@@ -405,6 +429,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--language", type=str, default=None)
     parser.add_argument("--planner", type=str, default=None)
     parser.add_argument("--extractor", type=str, default=None)
+    parser.add_argument("--backend", choices=("auto", "gguf", "hf"), default=None)
+    parser.add_argument("--llama-server", type=str, default=None)
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--context", type=int, default=None)
+    parser.add_argument("--startup-timeout", type=float, default=None)
+    parser.add_argument("--request-timeout", type=float, default=None)
     parser.add_argument("--max-chars", type=int, default=None)
     parser.add_argument("--timeout", type=float, default=None)
     parser.add_argument("--delay", type=float, default=None)
@@ -420,6 +450,16 @@ def main(argv: list[str] | None = None) -> int:
         "WEB2SPEC_LANGUAGE": args.language,
         "WEB2SPEC_PLANNER": args.planner,
         "WEB2SPEC_EXTRACTOR": args.extractor,
+        "WEB2SPEC_BACKEND": args.backend,
+        "WEB2SPEC_LLAMA_SERVER": args.llama_server,
+        "WEB2SPEC_LLAMA_DEVICE": args.device,
+        "WEB2SPEC_CONTEXT": str(args.context) if args.context else None,
+        "WEB2SPEC_STARTUP_TIMEOUT": (
+            str(args.startup_timeout) if args.startup_timeout else None
+        ),
+        "WEB2SPEC_REQUEST_TIMEOUT": (
+            str(args.request_timeout) if args.request_timeout else None
+        ),
         "WEB2SPEC_MAX_CHARS": str(args.max_chars) if args.max_chars else None,
         "WEB2SPEC_TIMEOUT": str(args.timeout) if args.timeout else None,
         "WEB2SPEC_DELAY": str(args.delay) if args.delay else None,

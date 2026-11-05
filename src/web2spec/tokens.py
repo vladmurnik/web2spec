@@ -57,11 +57,20 @@ def build_plan_user_message(sample: Sample) -> str:
 def build_plan_prompt(sample: Sample, tokenizer: Any) -> str:
     """Render the planner prompt; the target is a semantic CollectionPlan."""
 
-    messages = [
+    return _render_messages(_plan_messages(sample), tokenizer)
+
+
+def build_plan_prompt_text(sample: Sample) -> str:
+    """Render the planner prompt without loading a tokenizer (GGUF runtime)."""
+
+    return _manual_chatml(_plan_messages(sample))
+
+
+def _plan_messages(sample: Sample) -> list[dict[str, str]]:
+    return [
         {"role": "system", "content": PLAN_SYSTEM_PROMPT},
         {"role": "user", "content": build_plan_user_message(sample)},
     ]
-    return _render_messages(messages, tokenizer)
 
 
 def build_plan_extract_user_message(sample: Sample) -> str:
@@ -75,11 +84,35 @@ def build_plan_extract_user_message(sample: Sample) -> str:
 def build_plan_extract_prompt(sample: Sample, tokenizer: Any) -> str:
     """Render the plan-conditioned extraction prompt."""
 
-    messages = [
+    return _render_messages(_plan_extract_messages(sample), tokenizer)
+
+
+def build_plan_extract_prompt_text(sample: Sample) -> str:
+    """Render the extraction prompt without a tokenizer (GGUF runtime)."""
+
+    return _manual_chatml(_plan_extract_messages(sample))
+
+
+def _plan_extract_messages(sample: Sample) -> list[dict[str, str]]:
+    return [
         {"role": "system", "content": PLAN_EXTRACT_SYSTEM_PROMPT},
         {"role": "user", "content": build_plan_extract_user_message(sample)},
     ]
-    return _render_messages(messages, tokenizer)
+
+
+def build_prompt_text(sample: Sample) -> str:
+    """Render any prompt without a tokenizer for the llama.cpp runtime."""
+
+    if sample.task == "plan":
+        return build_plan_prompt_text(sample)
+    if sample.task == "plan_extract":
+        return build_plan_extract_prompt_text(sample)
+    return _manual_chatml(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_message(sample)},
+        ]
+    )
 
 
 def build_prompt(sample: Sample, tokenizer: Any) -> str:

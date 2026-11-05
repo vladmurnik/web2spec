@@ -103,6 +103,7 @@ HTML → JSON по фиксированной схеме. Остаётся produ
 | M7 | Опционально: 1.5B Coder / code track | pass@1 на execution-фикстурах | заморожено |
 | M8 | MCP-сервер: внешняя модель → задача → факты | stdio, `collect`/`search_links`, живой smoke, изоляция stdout | выполнено: 13 тестов, реальный `collect` на Habr |
 | M9 | Q4_K_M GGUF для planner/extractor | те же 50 задач, quality/speed отчёт | выполнено: 100% success, F1 1.0, ~161–172 ток/с; ограничения в `STATS.md` |
+| M10 | Q4_K_M как runtime по умолчанию + единый CLI | `web2spec collect/search/mcp/doctor`, тесты, чистая структура | выполнено: GGUF по умолчанию, 53 теста, README/scripts index |
 
 M8 не меняет качество извлечения: это транспорт и упаковка. Большая модель
 вызывает `collect(task=...)`, сервер локально делает поиск, загрузку и извлечение,
@@ -114,6 +115,14 @@ GGUF через `llama-server`. На 50 held-out страницах: task succes
 fact F1 1.0, 0 неверных значений, 101 с на 50 страниц (~2 с на страницу).
 Это узкий article/Habr-набор: 60 дат ушли в `missing`, 51 поле плана оказалось
 вне gold-плана; перенос на другие хосты не измерен.
+
+M10 закрепляет Q4_K_M как путь по умолчанию для `21_collect_urls.py`,
+`22_search_and_collect.py` и MCP-сервера. Появился общий runtime
+`src/web2spec/llama_runtime.py` (поиск `llama-server`, запуск сервера,
+batch-генерация, Q4-пути) и единый CLI `web2spec` с командами
+`collect`, `search`, `mcp`, `doctor`, `eval-*`, `train`, `merge`. PyTorch
+float16 остаётся fallback через `--backend hf`; merged-каталоги нужны для
+пересборки GGUF и обучения.
 
 Каждый этап заканчивается отчётом и commit'ом. Обучение запускается только после явного разрешения.
 

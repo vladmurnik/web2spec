@@ -343,3 +343,32 @@ backend, другие промпты и более лояльный разбор
 
 Обучение не запущено. Незавершённый `checkpoint-20` оставлен для возможного
 resume, но финального adapter нет.
+
+## 8. Runtime по умолчанию: Q4_K_M + единый CLI
+
+С 06.11.2026 `21_collect_urls.py`, `22_search_and_collect.py` и MCP-сервер
+по умолчанию используют:
+
+- `models/gguf/qwen05b-plan-Q4_K_M.gguf`;
+- `models/gguf/qwen05b-plan-extract-v2-Q4_K_M.gguf`.
+
+`llama-server` поднимается на `Vulkan0`, контекст 8192, `-ngl 99`, по одному
+процессу на модель. PyTorch-путь с merged-каталогами остался через
+`--backend hf`; `--backend auto` выбирает GGUF по расширению `.gguf`.
+
+Единая точка входа:
+
+```powershell
+web2spec doctor
+web2spec collect --task "..." --urls data/urls.txt
+web2spec search --task "..." --provider ddg
+web2spec mcp
+```
+
+Проверка после переключения: `pytest` для `test_llama_runtime`, `test_cli`,
+`test_runtime_cli`, `test_search_cli`, `test_mcp_server` — 53 теста; `ruff`
+чист. Q4 smoke на одной Habr-странице: planner 373 символа, extractor 324
+символа, title извлечён, дата честно ушла в `missing`.
+
+Старые f16 GGUF и base-модель оставлены как fallback/артефакты обучения, но
+runtime на них не ссылается. `outputs/runs` и merged-каталоги не удалялись.

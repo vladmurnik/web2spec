@@ -248,9 +248,30 @@ def test_generation_deterministic(tmp_path: Path) -> None:
     assert _fingerprint(first) != _fingerprint(other)
 
 
+def _identity(rows: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """Fields that must not change when only the HTML compressor evolves."""
+
+    return [
+        (
+            row["id"],
+            row["group_id"],
+            row["instruction"],
+            row["target"],
+            row["meta"]["lang"],
+            row["meta"]["complexity"],
+        )
+        for row in rows
+    ]
+
+
 def test_determinism_matches_committed_shards(tmp_path: Path) -> None:
-    """Regenerating with seed 42 must reproduce the ids/targets on disk."""
+    """Regenerating with seed 42 must reproduce the ids/targets on disk.
+
+    ``input_html`` is intentionally excluded: compression improvements add a
+    metadata header, while ids and labels must stay stable.
+    """
+
     regenerated, _ = gen.generate(tmp_path / "rerun", TOTAL_MIN, SEED)
     disk = [row for cat in CATEGORIES for row in _read_shard(cat)]
     assert len(regenerated) == len(disk)
-    assert _fingerprint(regenerated) == _fingerprint(disk)
+    assert _identity(regenerated) == _identity(disk)

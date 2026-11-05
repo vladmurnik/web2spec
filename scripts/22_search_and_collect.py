@@ -31,6 +31,14 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from web2spec.llama_runtime import (  # noqa: E402
+    DEFAULT_DEVICE,
+    DEFAULT_EXTRACTOR,
+    DEFAULT_PLANNER,
+)
+
 COLLECTOR = REPO_ROOT / "scripts" / "21_collect_urls.py"
 USER_AGENT = "web2spec-search/0.1 (local research; contact: local)"
 MAX_QUERIES = 6
@@ -379,11 +387,28 @@ def _collector_argv(args: argparse.Namespace, urls: list[str], out: Path) -> lis
         args.planner,
         "--extractor",
         args.extractor,
+        "--backend",
+        getattr(args, "backend", "auto"),
         "--plan-max-new-tokens",
         str(args.plan_max_new_tokens),
         "--fact-max-new-tokens",
         str(args.fact_max_new_tokens),
     ]
+    device = getattr(args, "device", None)
+    if device:
+        argv.extend(["--device", device])
+    llama_server = getattr(args, "llama_server", None)
+    if llama_server:
+        argv.extend(["--llama-server", llama_server])
+    context = getattr(args, "context", None)
+    if context:
+        argv.extend(["--context", str(context)])
+    startup_timeout = getattr(args, "startup_timeout", None)
+    if startup_timeout:
+        argv.extend(["--startup-timeout", str(startup_timeout)])
+    request_timeout = getattr(args, "request_timeout", None)
+    if request_timeout:
+        argv.extend(["--request-timeout", str(request_timeout)])
     for url in urls:
         argv.extend(["--url", url])
     if args.html_dir is not None:
@@ -491,13 +516,21 @@ def main(argv: list[str] | None = None) -> int:
         "--out", type=Path, default=REPO_ROOT / "data/reports/search_collected.json"
     )
     parser.add_argument(
-        "--planner", type=str, default=str(REPO_ROOT / "models/merged/qwen05b-plan")
+        "--planner", type=str, default=str(DEFAULT_PLANNER)
     )
     parser.add_argument(
         "--extractor",
         type=str,
-        default=str(REPO_ROOT / "models/merged/qwen05b-plan-extract-v2"),
+        default=str(DEFAULT_EXTRACTOR),
     )
+    parser.add_argument(
+        "--backend", choices=("auto", "gguf", "hf"), default="auto"
+    )
+    parser.add_argument("--llama-server", type=str, default=None)
+    parser.add_argument("--device", type=str, default=DEFAULT_DEVICE)
+    parser.add_argument("--context", type=int, default=8192)
+    parser.add_argument("--startup-timeout", type=float, default=240.0)
+    parser.add_argument("--request-timeout", type=float, default=300.0)
     parser.add_argument("--max-chars", type=int, default=12_000)
     parser.add_argument("--delay", type=float, default=1.0)
     parser.add_argument("--html-dir", type=Path, default=None)

@@ -1,40 +1,78 @@
 # web2spec
 
-Дообучение **Qwen2.5-0.5B-Instruct** превращать сжатый HTML в структурированный JSON на ноутбуке с **4 GB VRAM** (RTX 3050 Ti Laptop).
+Локальный конвейер **«задача → поиск → страницы → структурированные факты»** для ноутбука с **4 GB VRAM** (RTX 3050 Ti Laptop).
 
-Проект намеренно не учит модель писать скраперы. Текущий production-компонент — extraction: модель заполняет целевую схему, а код/селекторы при необходимости рендерит детерминированный слой. Следующий шаг — task-conditioned planner: модель по задаче решает, что собирать. Общий roadmap — [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md), детальный следующий шаг — [`docs/PLANNER_PLAN.md`](docs/PLANNER_PLAN.md). Причины и границы — в [`docs/PLAN.md`](docs/PLAN.md), порядок сборки — в [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+Большая модель по API пишет только то, что нужно найти. Дальше всё происходит локально: маленькая модель строит план сбора, локальный метапоиск находит ссылки, страницы скачиваются и сжимаются, второй маленький модель-экстрактор достаёт факты с точным `evidence`. Большая модель получает компактный JSON и не тратит токены на HTML и платные поисковые API.
+
+Проект вырос из QLoRA-дообучения Qwen2.5-0.5B для извлечения данных. Обучение и эксперименты сохранены в репозитории, но повседневный runtime теперь не требует PyTorch: planner и extractor запускаются как **Q4_K_M GGUF** через `llama-server`.
+
+- Roadmap: [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md)
+- План planner-трека: [`docs/PLANNER_PLAN.md`](docs/PLANNER_PLAN.md)
+- Метрики и ограничения: [`docs/STATS.md`](docs/STATS.md)
+- Датасеты: [`docs/DATASET.md`](docs/DATASET.md)
+- Источники: [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md)
+- Индекс скриптов: [`scripts/README.md`](scripts/README.md)
 
 ## Статус
 
 | Слой | Состояние |
 |---|---|
-| Контракты данных и конфиги (`schema.py`, `config.py`, `configs/`) | готово |
-| Сжатие HTML и токенизация | готово |
-| Валидация, дедуп, group-aware splits, CLI | готово |
-| QLoRA-обучение (dataset, trainer, smoke-режим) | готово, проверено dry-run |
-| Слияние адаптера и конвертация в GGUF | готово, planner/extractor Q4_K_M проверены |
-| Оценка качества (JSON validity, P/R/F1) | готово |
-| Синтетика через teacher-модель | готово |
-| Сбор реальных страниц по JSON-LD (`08_collect.py`) | готово |
-| Синтетический генератор (`09_make_synthetic.py`) | готово |
-| Датасет и его ограничения | [`docs/DATASET.md`](docs/DATASET.md) |
-| Источники данных и лицензии | [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) |
-| Общий план развития | [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md) |
-| План следующего шага (planner) | [`docs/PLANNER_PLAN.md`](docs/PLANNER_PLAN.md) |
+| Контракты данных, конфиги, валидация | готово |
+| Сжатие HTML + сохранение метаданных | готово |
+| QLoRA-обучение planner/extractor | готово, артефакты в `models/` и `outputs/` |
+| Planner + plan-conditioned extractor | готово |
+| Runtime-каскад с repair/validation | готово |
+| Q4_K_M GGUF как runtime по умолчанию | готово |
+| Локальный поиск: задача → ссылки | готово |
+| MCP-сервер для любой MCP-совместимой модели | готово |
+| Единый CLI `web2spec` | готово |
+
+Проверенные цифры на 50 held-out парах article/Habr: **task success 94%** у PyTorch float16 и **100%** у Q4_K_M, **fact F1 0.9388 / 1.0** соответственно, **0 неверных значений** после repair. Q4_K_M обрабатывает 50 страниц за **101 с** (~2 с/страницу). Это узкий срез: 18 уникальных URL, только статьи; перенос на job/product/realestate не измерен. Подробности и честные ограничения — в [`docs/STATS.md`](docs/STATS.md).
+
+## Архитектура
+
+```
+большая модель / MCP-клиент
+        │  задача + необязательные URL
+        ▼
+локальный поиск (SearXNG / DuckDuckGo HTML)
+        │  ссылки, дедуп, ранжирование
+        ▼
+fetch + robots.txt + сжатие HTML + metadata header
+        │
+        ▼
+planner Q4_K_M  ──►  CollectionPlan: сущность и поля
+        │
+        ▼
+extractor Q4_K_M  ──►  FactSet: name / value / evidence
+        │
+        ▼
+repair + validate  ──►  только проверенные факты, остальное в missing
+```
+
+HTML наружу не отдаётся. Каждый факт подтверждается дословной подстрокой сжатого HTML; если доказательства нет, поле уходит в `missing`, а не выдумывается.
 
 ## Структура
 
 ```
-configs/            data.yaml, train_qlora_4gb.yaml, eval.yaml, tasks.yaml
-src/web2spec/       библиотека пайплайна
-scripts/            01_validate.py … 09_make_synthetic.py, ps1-обёртки
-tests/              pytest, включая проверки сборщика и синтетики
-examples/demo.jsonl 3 примера для проверки пайплайна без скрапинга
-data/{raw,interim,processed,reports}/
-models/{base,merged,gguf}/
-outputs/runs/       адаптеры, чекпоинты, логи
-docs/               PLAN.md, IMPLEMENTATION_PLAN.md, MASTER_PLAN.md, PLANNER_PLAN.md, DATA_SOURCES.md, DATASET.md, STATS.md
+src/web2spec/       библиотека: схемы, сжатие HTML, plan/fact, llama runtime, CLI
+scripts/            numbered pipeline: данные → обучение → eval → runtime → MCP
+configs/            YAML для данных, обучения и eval; mcp.example.json
+tests/              pytest без GPU и сети, плюс контрактные тесты
+docs/               планы, метрики, датасеты, источники
+examples/           demo.jsonl для быстрой проверки
+data/               raw/interim/processed/reports (gitignored)
+models/             base/merged/gguf (gitignored)
+outputs/runs/       адаптеры, чекпоинты, логи обучения (gitignored)
 ```
+
+Ключевые модули:
+
+- `web2spec/html_compress.py` — сжатие страницы и извлечение метаданных;
+- `web2spec/plan.py` — `CollectionPlan`, `FactSet`, `repair_factset`, lenient loader;
+- `web2spec/llama_runtime.py` — запуск `llama-server`, Q4-пути по умолчанию, batch-генерация;
+- `web2spec/tokens.py` — ChatML-промпты без зависимости от tokenizer;
+- `web2spec/cli.py` — единая точка входа `web2spec`.
 
 ## Быстрый старт
 
@@ -42,95 +80,111 @@ docs/               PLAN.md, IMPLEMENTATION_PLAN.md, MASTER_PLAN.md, PLANNER_PLA
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 
-python scripts/01_validate.py --input examples/demo.jsonl --output data/processed
-python scripts/02_train.py --dry-run
-python scripts/02_train.py --config configs/train_qlora_4gb.yaml --smoke
-python scripts/03_merge.py --config configs/train_qlora_4gb.yaml
-pwsh scripts/04_convert_gguf.ps1
-python scripts/05_eval.py --config configs/eval.yaml
-pwsh scripts/06_serve.ps1
+web2spec doctor
 ```
 
-## Железо
+`doctor` проверяет Q4-модели, `llama-server` и Python. Если модели ещё не собраны, см. раздел «Модели».
 
-- GPU: RTX 3050 Ti Laptop, 4 GB, compute 8.6 (bf16 поддерживается).
-- RAM: 16 GB, свободно ~105 GB диска.
-- Ожидаемый пик обучения: 2.0–2.5 GB VRAM, 2–6 часов на 1–2k примеров.
+### Единый CLI
 
-## Правила разработки
+```powershell
+web2spec collect --task "Собери названия и авторов статей" --urls data/urls.txt
+web2spec search  --task "Найди статьи про Obsidian и LLM" --provider ddg
+web2spec mcp
+web2spec eval-q4 --limit 50
+```
 
-- Тяжёлые импорты (`torch`, `transformers`, `peft`, `bitsandbytes`) — **только внутри функций**, чтобы валидация и тесты работали без ML-стека.
-- Все пути в YAML — относительно корня репозитория; резолвинг через `web2spec.config.REPO_ROOT`.
-- Конфиги строгие (`extra="forbid"`): опечатка в ключе — ошибка, а не молчаливый дефолт.
+`web2spec <command> --help` показывает параметры конкретного этапа. Numbered-скрипты остаются самостоятельными: их можно запускать напрямую, если нужен полный контроль.
+
+## Модели
+
+По умолчанию runtime использует:
+
+| Роль | Путь | Размер |
+|---|---|---:|
+| planner | `models/gguf/qwen05b-plan-Q4_K_M.gguf` | 379.4 MB |
+| extractor | `models/gguf/qwen05b-plan-extract-v2-Q4_K_M.gguf` | 379.4 MB |
+
+Оба файла gitignored: чистое клонирование не содержит весов. Их нужно собрать из merged-каталогов или скопировать на машину.
+
+`llama-server` берётся из `PATH`, переменной `WEB2SPEC_LLAMA_SERVER` или аргумента `--llama-server`. Для 4 GB VRAM используется Vulkan-устройство `Vulkan0`; переопределяется через `WEB2SPEC_LLAMA_DEVICE` или `--device`.
+
+### Пересборка Q4_K_M
+
+```powershell
+# merged-каталоги получаются через обучение + merge
+pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan `
+  -Name qwen05b-plan -Quant Q4_K_M
+pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan-extract-v2 `
+  -Name qwen05b-plan-extract-v2 -Quant Q4_K_M
+```
+
+Важно: hidden size 896 не делится на 256, поэтому квантователь оставляет часть тензоров в q5_0/q6_K/q8_0. Эффективный размер — ~6.35 BPW, а не чистые 4 бита. Это ожидаемое поведение, а не ошибка конвертации.
+
+### PyTorch fallback
+
+Если GGUF нет или нужен старый путь, collector умеет работать с merged-каталогами:
+
+```powershell
+web2spec collect --task "..." --urls data/urls.txt `
+  --backend hf `
+  --planner models/merged/qwen05b-plan `
+  --extractor models/merged/qwen05b-plan-extract-v2
+```
+
+`--backend auto` (по умолчанию) выбирает GGUF, если путь заканчивается на `.gguf`, иначе PyTorch. Для повседневной работы Q4_K_M быстрее примерно в 5–6 раз и занимает меньше VRAM.
 
 ## Локальный сборщик: задача + список URL
 
-`scripts/21_collect_urls.py` — CLI для внешнего агента. Большая модель (или поиск)
-сама находит URL; локальный пайплайн скачивает страницы, сжимает HTML, строит
-`CollectionPlan` планировщиком, извлекает `FactSet` plan-conditioned экстрактором,
-детерминированно правит evidence и строго валидирует результат. Наружу отдаётся
-только JSON с фактами — HTML в контекст большой модели не попадает.
-
-### Что делает и чего не делает
+`web2spec collect` (или `scripts/21_collect_urls.py`) принимает задачу и URL, скачивает страницы, сжимает HTML, строит `CollectionPlan`, извлекает `FactSet`, детерминированно правит evidence и строго валидирует результат.
 
 Делает:
 
-- качает по одному URL за раз (без параллельности), уважает `robots.txt` и `Crawl-delay`;
-- сжимает HTML (`compress_html`, по умолчанию до 12 000 символов) и выкидывает скрипты/стили;
-- сохраняет метаданные страницы (`title`, `author`, `published_at`, `modified_at`, canonical) из `meta`, JSON-LD и `<time datetime>` в компактный header перед контентом, чтобы даты не терялись при сжатии;
-- planner → extractor одним merged-модельным проходом каждый, на 4 GB GPU (float16);
-- `repair_factset`: evidence, которого нет в HTML дословно, либо перепривязывается к
-  найденному фрагменту, либо поле уходит в `missing`; факты вне плана отбрасываются;
+- качает по одному URL, уважает `robots.txt` и `Crawl-delay`;
+- сжимает HTML (по умолчанию до 12 000 символов), удаляет скрипты/стили;
+- сохраняет `title`, `description`, `author`, `published_at`, `modified_at`, canonical из `meta`, JSON-LD и `<time datetime>` в header перед контентом;
+- запускает planner и extractor по очереди, чтобы 4 GB GPU держал только одну модель;
+- `repair_factset`: evidence перепривязывается к найденному фрагменту или поле уходит в `missing`; факты вне плана отбрасываются;
 - `validate_factset`: покрытие полей плана и точное вхождение evidence;
-- пишет UTF-8 JSON с `facts`, `missing`, `repairs`, `error` и `aggregate`.
+- пишет UTF-8 JSON с `facts`, `missing`, `repairs`, `error`, `aggregate`.
 
 Не делает:
 
-- не исполняет JavaScript и не ждёт SPA-рендеринг;
+- не исполняет JavaScript и не ждёт SPA;
 - не обходит анти-бот, капчи, логины и платные стены;
 - не ходит по пагинации и не обходит сайт — обрабатывает ровно переданные URL;
-- не гарантирует «полноту» сайта: один URL = одна страница и один результат;
-- не тянет большие модели: нужны локальные merged-каталоги (см. ниже).
+- не гарантирует полноту сайта: один URL = одна страница = один результат.
 
 ### Команда
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\21_collect_urls.py `
+web2spec collect `
   --task "Собери названия, авторов и даты публикации статей" `
   --urls data/urls.txt `
   --out data/reports/collected.json `
-  --planner models/merged/qwen05b-plan `
-  --extractor models/merged/qwen05b-plan-extract-v2 `
   --max-pages 20 --max-chars 12000 --timeout 20 --delay 1.0
 ```
 
-`data/urls.txt` — по одному URL в строке; пустые строки и строки с `#` игнорируются.
-Отдельный URL можно передать повторяемым `--url`. Дубликаты схлопываются с
-сохранением порядка, затем применяется `--max-pages`.
+`data/urls.txt` — по одному URL в строке; пустые строки и `#` игнорируются. Отдельный URL можно передать повторяемым `--url`. Дубликаты схлопываются с сохранением порядка, затем применяется `--max-pages`.
 
-Офлайн-режим (тесты, повторный прогон сохранённых страниц):
+Офлайн-режим для тестов и повторного прогона сохранённых страниц:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\21_collect_urls.py `
+web2spec collect `
   --task "Собери названия, авторов и даты публикации статей" `
   --url https://example.com/article/1 `
   --html-dir data/offline_html `
   --out data/reports/collected.json
 ```
 
-В нём сеть и robots.txt не используются. Файл ищется внутри `--html-dir` по
-`sha1(url).html` (UTF-8-хэш полного URL), затем по последнему сегменту пути
-(`mug`, `mug.html`, с percent-decoding). Если файла нет — страница получает
-`status="fetch_error"` и `error`.
+Файл ищется внутри `--html-dir` по `sha1(url).html` (UTF-8-хэш полного URL), затем по последнему сегменту пути (`mug`, `mug.html`, с percent-decoding). Если файла нет — страница получает `status="fetch_error"`.
 
 ### Выходной JSON
-
-UTF-8, отступ 2, без HTML:
 
 ```json
 {
   "task": "Собери названия, авторов и даты публикации статей",
-  "generated_at": "2026-11-05T12:00:00+00:00",
+  "generated_at": "2026-11-06T12:00:00+00:00",
   "pages": [
     {
       "url": "https://example.com/article/1",
@@ -165,230 +219,103 @@ UTF-8, отступ 2, без HTML:
 ```
 
 - `status`: `ok` | `fetch_error` | `plan_error` | `extract_error`.
-- `facts` — только проверенные факты: `name` из плана, `value` скаляр, `evidence` —
-  дословная подстрока сжатого HTML.
-- `missing` — поля плана, которых на странице нет (или evidence не удалось подтвердить).
-- `repairs.evidence` — какие evidence перепривязаны; `repairs.dropped` — какие факты
-  потеряли доказательство; `dropped_foreign` — факты вне плана, отброшенные как лишние.
+- `facts` — только проверенные факты: `name` из плана, скалярный `value`, дословный `evidence`.
+- `missing` — поля плана, которых на странице нет или evidence не подтвердился.
+- `repairs.evidence` — перепривязанные evidence; `repairs.dropped` — факты, потерявшие доказательство; `dropped_foreign` — факты вне плана.
 - `error` — текст ошибки стадии (`null` для `ok`).
-- `aggregate` — по записи на каждый запрошенный URL, `stats` — счётчики.
-- Если `validate_factset` всё же падает, страница получает `extract_error`,
-  `facts` и `missing` пустые: непроверенные факты наружу не отдаются.
+- Если `validate_factset` падает, страница получает `extract_error`, а `facts` и `missing` остаются пустыми.
 
-### Инструкция внешнему агенту
-
-1. Сформируй список URL поиском/браузером и короткую задачу на естественном языке.
-2. Запиши URL в файл (по одному в строке) и запусти CLI (команда выше).
-3. Читай только `--out` JSON: `aggregate` для сводки, `pages` для evidence и ошибок.
-4. Не вставляй HTML и не проси модель «посмотреть страницу» — весь HTML остаётся локально.
-5. Политика повторов: `fetch_error` (таймаут, 429/5xx, robots) — повтор через паузу,
-   увеличив `--delay`/`--timeout`; `plan_error` — уточни формулировку `--task`;
-   `extract_error` — страница не подходит под план или модель не покрыла поля плана,
-   повтор обычно не помогает, лучше исключить URL.
-6. Коды выхода: `0` — хотя бы одна страница `ok`; `1` — все страницы с ошибкой;
-   `2` — неверные аргументы (argparse).
-7. Прогресс печатается в stderr, итоговая строка — в stdout; JSON пишется один раз
-   в конце прогона.
-
-### Модели
-
-`models/merged/qwen05b-plan` и `models/merged/qwen05b-plan-extract-v2` — локальные
-артефакты (каталог `models/` в `.gitignore`), их нужно собрать заранее
-(`scripts/03_merge.py` / `02_train.py`). Без них CLI упадёт на загрузке модели;
-чистая логика разбора и валидации тестируется без GPU:
-`.\.venv\Scripts\python.exe -m pytest tests\test_runtime_cli.py -q`.
-
-Для скорости те же модели можно держать в GGUF Q4_K_M и запускать через
-`llama.cpp`. Конвертация (из корня репозитория, `LLAMA_CPP_DIR` указывает на
-клонированный llama.cpp):
-
-```powershell
-pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan `
-  -Name qwen05b-plan -Quant Q4_K_M
-pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan-extract-v2 `
-  -Name qwen05b-plan-extract-v2 -Quant Q4_K_M
-```
-
-Затем оценка:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\24_eval_q4km.py --limit 50 `
-  --planner models\gguf\qwen05b-plan-Q4_K_M.gguf `
-  --extractor models\gguf\qwen05b-plan-extract-v2-Q4_K_M.gguf `
-  --report data\reports\eval_q4km.json
-```
-
-На 50 held-out страницах Q4_K_M дал ~161–172 ток/с и **101 с на 50 страниц**
-(~2 с на страницу) против 586.7 с у PyTorch float16. Качество на этом узком
-article/Habr-наборе — F1 1.0, 0 неверных значений, но 60 дат ушли в `missing`
-из-за fixture без meta/JSON-LD. Подробности и ограничения — в `docs/STATS.md`.
-MCP-сервер по умолчанию всё ещё использует merged-каталоги, не GGUF.
+Коды выхода: `0` — хотя бы одна страница `ok`; `1` — все страницы с ошибкой; `2` — неверные аргументы.
 
 ## Локальный поиск: задача → ссылки → данные
 
-`scripts/22_search_and_collect.py` добавляет к конвейеру этап поиска, чтобы
-внешней большой модели не нужно было ни искать в платном API, ни читать HTML.
+`web2spec search` (или `scripts/22_search_and_collect.py`) добавляет этап поиска, чтобы внешней большой модели не нужно было искать в платном API или читать HTML.
 
 ```
 задача → локальная LLM (опционально) → поисковые запросы
        → локальный метапоиск (SearXNG или DuckDuckGo HTML)
        → дедуп и ранжирование ссылок
-       → scripts/21_collect_urls.py (fetch → compress → planner → extractor)
-       → один JSON с фактами, evidence и ошибками
+       → collector (fetch → compress → planner → extractor)
+       → один JSON с фактами
 ```
 
-Важно: LLM не «гуглит» сама. Она формулирует запросы, а ссылки находит
-метапоисковик. Платные поисковые API не используются.
-
-### Быстрый запуск
+LLM не «гуглит» сама: она формулирует запросы, а ссылки находит метапоисковик. Платные поисковые API не используются.
 
 ```powershell
-# 1. Только поиск ссылок (без GPU-моделей), DDG без ключа:
-.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+# 1. Только поиск ссылок, без GPU-моделей:
+web2spec search `
   --task "Найди статьи про Obsidian и LLM на Habr" `
   --provider ddg --search-only --max-results 10 `
-  --out data\reports\links.json
+  --out data/reports/links.json
 
-# 2. Полный конвейер: поиск + сбор фактов:
-.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+# 2. Полный конвейер:
+web2spec search `
   --task "Найди статьи про Obsidian и LLM на Habr" `
   --provider ddg --max-results 10 --max-pages 5 `
-  --out data\reports\search_collected.json
+  --out data/reports/search_collected.json
 ```
 
 ### Локальная LLM для запросов
 
-Поддерживаются Ollama (по умолчанию) и OpenAI-совместимые серверы (LM Studio,
-vLLM). Модель задаётся именем, веса и сервер пользователь ставит отдельно:
+Поддерживаются Ollama (по умолчанию) и OpenAI-совместимые серверы (LM Studio, vLLM). Модель задаётся именем, веса и сервер пользователь ставит отдельно:
 
 ```powershell
-# Ollama, модель 3B в Q4 (~2 ГБ VRAM)
 ollama pull qwen2.5:3b
-.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+web2spec search `
   --task "Сравни цены на RTX 5060 Ti" `
   --provider searxng --llm-model qwen2.5:3b `
   --llm-url http://localhost:11434 --search-only `
-  --out data\reports\links.json
-
-# OpenAI-совместимый сервер
-.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
-  --task "..." --llm-provider openai --llm-url http://localhost:1234 `
-  --llm-model local-model --search-only --out data\reports\links.json
+  --out data/reports/links.json
 ```
 
-Если LLM недоступна или вернула мусор, скрипт честно пишет warning и использует
-саму задачу как запрос. Без `--llm-model` локальная LLM не нужна.
+Если LLM недоступна или вернула мусор, скрипт пишет warning и использует текст задачи как запрос. Без `--llm-model` локальная LLM не нужна.
 
 ### Поисковые провайдеры
 
-- `--provider searxng --searxng-url http://localhost:8080` — рекомендуется.
-  SearXNG агрегирует публичные движки и отдаёт JSON без ключей и оплаты.
-  В `settings.yml` экземпляра должен быть включён `formats: [html, json]`.
-  Проще всего поднять локально через Docker; публичные инстансы часто
-  ограничивают JSON.
-- `--provider ddg` — HTML-эндпоинт DuckDuckGo без ключа. Работает без
-  установки, но нестабилен и может отдавать 429/ captcha при частых запросах.
-
-### Что в JSON
-
-К отчёту коллектора добавляется блок `search`:
-
-```json
-{
-  "task": "...",
-  "pages": [{"url": "...", "status": "ok", "facts": [...], "missing": [...]}],
-  "aggregate": {"https://...": {"facts": {"title": "..."}}},
-  "stats": {"requested": 5, "ok": 4, "failed": 1, "by_status": {"ok": 4, "fetch_error": 1}},
-  "search": {
-    "provider": "ddg",
-    "query_source": "ollama:qwen2.5:3b",
-    "queries": ["..."],
-    "candidates": [{"url": "...", "title": "...", "snippet": "...", "score": 0.42}],
-    "count": 10,
-    "warnings": [],
-    "collector_error": null
-  }
-}
-```
-
-`--search-only` возвращает только `task`, `generated_at`, пустые `pages`/`stats`
-и блок `search` — удобно, чтобы большая модель выбрала ссылки сама.
+- `--provider searxng --searxng-url http://localhost:8080` — рекомендуется. SearXNG агрегирует публичные движки и отдаёт JSON без ключей. В `settings.yml` нужно включить `formats: [html, json]`.
+- `--provider ddg` — HTML-эндпоинт DuckDuckGo без ключа. Работает без установки, но нестабилен и может отдавать 429/captcha.
 
 ### Ограничения
 
 - Поиск — это метапоиск/скрапинг публичных страниц, не официальный Google API.
-  Возможны блокировки, лимиты и разное качество выдачи.
-- 4 ГБ VRAM: не держите Ollama с 3B/7B и конвейер 0.5B одновременно. Надёжный
-  путь — сначала `--search-only`, затем выгрузить LLM (`ollama stop <model>`)
-  и запустить `21_collect_urls.py` по сохранённому списку ссылок.
-- Коллектор по-прежнему берёт ровно переданные URL: без JS/SPA, антибота,
-  пагинации и обхода сайта. Одна ссылка = одна страница.
-- robots.txt, паузы и таймауты соблюдаются на этапе сбора; поисковые запросы
-  идут на публичные эндпоинты провайдера.
+- 4 ГБ VRAM: не держите Ollama с 3B/7B и конвейер 0.5B одновременно. Надёжный путь — сначала `--search-only`, затем `ollama stop <model>` и `collect` по сохранённым ссылкам.
+- Коллектор берёт ровно переданные URL: без JS/SPA, антибота, пагинации и обхода сайта.
+- Поисковые запросы идут на публичные эндпоинты провайдера; robots.txt и паузы соблюдаются на этапе сбора.
 
 ## MCP-сервер: любая модель → задача → факты
 
-`scripts/23_mcp_server.py` — это готовый MCP-сервер (stdio), который подключается
-к Claude Desktop, Cursor, Cline, Continue или любому другому MCP-клиенту. Большая
-модель по API пишет только задачу, а сервер локально делает всё остальное:
+`web2spec mcp` (или `scripts/23_mcp_server.py`) — MCP-сервер stdio для Claude Desktop, Cursor, Cline, Continue и любого другого MCP-клиента. Большая модель пишет только задачу, а сервер локально делает всё остальное:
 
 ```
 большая модель (MCP-клиент)
   → tool collect(task="что найти")
-  → локальная LLM формулирует поисковые запросы (опционально)
-  → локальный метапоиск ищет ссылки (SearXNG или DDG, без платных API)
+  → локальная LLM формулирует запросы (опционально)
+  → локальный метапоиск ищет ссылки
   → страницы скачиваются и сжимаются
-  → маленькие модели planner + extractor достают факты
-  → большая модель получает компактный JSON: факты, missing, ошибки
+  → planner + extractor достают факты
+  → большая модель получает компактный JSON
 ```
 
-HTML, сырые страницы и полные тексты наружу не отдаются. Модель-клиент платит
-токены только за нужные поля.
-
-### Инструменты
+HTML и полные тексты наружу не отдаются.
 
 | Инструмент | Что делает |
-| --- | --- |
-| `collect` | Главный инструмент: `task` → поиск → скачивание → факты. Если передан `urls`, поиск пропускается и обрабатываются только эти ссылки. |
-| `search_links` | Только поиск ссылок, без скачивания и моделей. Удобно, если большая модель хочет сама выбрать URL. |
+|---|---|
+| `collect` | `task` → поиск → скачивание → факты. Если передан `urls`, поиск пропускается. |
+| `search_links` | Только поиск ссылок, без скачивания и моделей. |
 
 Параметры `collect`:
 
-- `task` (обязательный) — что найти, обычным текстом;
+- `task` (обязательный) — что найти;
 - `urls` — необязательный список URL;
 - `max_results` — сколько ссылок взять из поиска (по умолчанию 10);
 - `max_pages` — сколько страниц обработать (по умолчанию 8);
-- `include_evidence` — добавить точные цитаты `evidence` (по умолчанию `false`,
-  чтобы не тратить токены).
-
-Пример ответа `collect` (по одной странице):
-
-```json
-{
-  "task": "Track new articles, their authors, and publication dates.",
-  "pages": [
-    {
-      "url": "https://habr.com/ru/articles/...",
-      "status": "ok",
-      "entity": "article",
-      "facts": {"title": "Как я оформляю тренировки и питание в Obsidian"},
-      "missing": ["published_at"],
-      "error": null
-    }
-  ],
-  "stats": {"requested": 1, "ok": 1, "failed": 0, "by_status": {"ok": 1}},
-  "search": {"provider": "searxng", "queries": ["..."], "warnings": []}
-}
-```
-
-Если поле не найдено, оно попадает в `missing`, а не выдумывается. `status`
-может быть `ok`, `fetch_error`, `plan_error` или `extract_error`.
+- `include_evidence` — добавить точные цитаты (по умолчанию `false`, чтобы не тратить токены).
 
 ### Подключение
 
-1. Собери окружение и модели (см. разделы выше).
+1. Собери окружение и Q4-модели (см. «Модели»).
 2. Скопируй `configs/mcp.example.json` в конфиг клиента и замени пути.
-3. Перезапусти клиент — появятся инструменты `collect` и `search_links`.
+3. Перезапусти клиент — появятся `collect` и `search_links`.
 
 Claude Desktop (`claude_desktop_config.json`):
 
@@ -408,47 +335,47 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-Cursor: тот же блок в `~/.cursor/mcp.json` (или в настройках MCP). Для любого
-другого клиента достаточно запустить `python scripts\23_mcp_server.py` как
-stdio-процесс.
+Cursor: тот же блок в `~/.cursor/mcp.json`. Для любого другого клиента достаточно запустить `python scripts\23_mcp_server.py` как stdio-процесс.
 
-### Настройки через переменные окружения
+### Настройки
 
 | Переменная | По умолчанию | Назначение |
-| --- | --- | --- |
+|---|---|---|
 | `WEB2SPEC_PROVIDER` | `searxng` | `searxng` или `ddg` |
 | `WEB2SPEC_SEARXNG_URL` | `http://localhost:8080` | адрес SearXNG с JSON |
 | `WEB2SPEC_LLM_MODEL` | пусто | модель для запросов; без неё используется текст задачи |
 | `WEB2SPEC_LLM_URL` | `http://localhost:11434` | Ollama или OpenAI-совместимый сервер |
 | `WEB2SPEC_LLM_PROVIDER` | `ollama` | `ollama` или `openai` |
 | `WEB2SPEC_LANGUAGE` | `ru` | язык поисковой выдачи |
-| `WEB2SPEC_PLANNER` | `models/merged/qwen05b-plan` | путь к planner |
-| `WEB2SPEC_EXTRACTOR` | `models/merged/qwen05b-plan-extract-v2` | путь к extractor |
+| `WEB2SPEC_PLANNER` | `models/gguf/qwen05b-plan-Q4_K_M.gguf` | planner |
+| `WEB2SPEC_EXTRACTOR` | `models/gguf/qwen05b-plan-extract-v2-Q4_K_M.gguf` | extractor |
+| `WEB2SPEC_BACKEND` | `auto` | `auto`, `gguf` или `hf` |
+| `WEB2SPEC_LLAMA_SERVER` | пусто | путь к `llama-server` |
+| `WEB2SPEC_LLAMA_DEVICE` | `Vulkan0` | устройство llama.cpp; пусто — авто |
+| `WEB2SPEC_CONTEXT` | `8192` | контекст llama-server |
 | `WEB2SPEC_MAX_CHARS` | `12000` | сколько символов страницы видит модель |
 | `WEB2SPEC_TIMEOUT` | `20` | таймаут загрузки страницы, секунды |
 | `WEB2SPEC_DELAY` | `1.0` | пауза между страницами, секунды |
-| `WEB2SPEC_HTML_DIR` | пусто | если задан, страницы читаются из локальных HTML вместо сети (офлайн-тесты) |
+| `WEB2SPEC_HTML_DIR` | пусто | офлайн-HTML вместо сети |
 
-Те же значения можно передать аргументами сервера (`--provider`, `--llm-model`,
-`--planner` и т.д.) — они переопределяют окружение.
+Те же значения можно передать аргументами сервера (`--provider`, `--planner`, `--backend`, `--device` и т.д.) — они переопределяют окружение.
 
-### Проверка
+### Проверка и скорость
 
 ```powershell
-# 13 тестов протокола и инструментов, без GPU и сети:
+# Протокол и инструменты, без GPU и сети:
 .\.venv\Scripts\python.exe -m pytest tests\test_mcp_server.py -q
-
-# Живой smoke только поиска (без моделей):
-.\.venv\Scripts\python.exe scripts\23_mcp_server.py
-# затем в клиенте вызвать search_links(task="...")
 ```
 
-Сервер пишет диагностику только в stderr, stdout остаётся чистым JSON-RPC.
-Один вызов `collect` загружает 0.5B модели и занимает заметное время; при 4 ГБ
-VRAM не держите одновременно Ollama с 3B/7B и конвейер. Схема: `search_links` →
-`ollama stop <model>` → `collect` с готовыми `urls`.
+Сервер пишет диагностику только в stderr, stdout остаётся чистым JSON-RPC. Один вызов `collect` поднимает `llama-server` и обрабатывает страницы последовательно; при 4 ГБ VRAM не держите одновременно Ollama с 3B/7B и конвейер. Схема: `search_links` → `ollama stop <model>` → `collect` с готовыми `urls`.
 
-Замер на RTX 3050 Ti 4 GB (float16, batch 1): planner и extractor вместе дают
-**~24 ток/с** и **~11.7 с на страницу**; 5 уникальных страниц через MCP `collect`
-обрабатываются за **58 с** с учётом холодного старта. Поиск 5 ссылок через DDG —
-около 2 с. Подробности — в `docs/STATS.md`.
+Замер Q4_K_M на RTX 3050 Ti 4 GB: planner ~172 ток/с, extractor ~161 ток/с, **~2 с на страницу**, 50 страниц за 101 с. Для сравнения PyTorch float16 даёт ~24 ток/с и ~11.7 с на страницу. Поиск 5 ссылок через DDG — около 2 с. Подробности — в [`docs/STATS.md`](docs/STATS.md).
+
+## Правила разработки
+
+- Тяжёлые импорты (`torch`, `transformers`, `peft`, `bitsandbytes`) — только внутри функций, чтобы валидация и тесты работали без ML-стека.
+- Все пути в YAML — относительно корня репозитория; резолвинг через `web2spec.config.REPO_ROOT`.
+- Конфиги строгие (`extra="forbid"`): опечатка в ключе — ошибка.
+- Факты никогда не выдумываются: нет точного evidence — поле уходит в `missing`.
+- Production-артефакты и `outputs/runs` не перезаписываются без явного разрешения.
+- Тесты: `.\.venv\Scripts\python.exe -m pytest -q`; известное Windows-исключение — `tests/test_synth.py::test_cli_dry_run` (cp1251), не связано с runtime.

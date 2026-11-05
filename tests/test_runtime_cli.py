@@ -227,14 +227,14 @@ def test_cli_offline_end_to_end(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         collect_urls,
         "generate_plans",
-        lambda items, model_dir, max_new_tokens, task: {
+        lambda items, model_dir, max_new_tokens, task, **kwargs: {
             item_url: plan_raw for item_url, _ in items
         },
     )
     monkeypatch.setattr(
         collect_urls,
         "generate_facts",
-        lambda items, model_dir, max_new_tokens, task: {
+        lambda items, model_dir, max_new_tokens, task, **kwargs: {
             item_url: facts_raw for item_url, _, _ in items
         },
     )
