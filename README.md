@@ -196,3 +196,105 @@ UTF-8, отступ 2, без HTML:
 (`scripts/03_merge.py` / `02_train.py`). Без них CLI упадёт на загрузке модели;
 чистая логика разбора и валидации тестируется без GPU:
 `.\.venv\Scripts\python.exe -m pytest tests\test_runtime_cli.py -q`.
+
+## Локальный поиск: задача → ссылки → данные
+
+`scripts/22_search_and_collect.py` добавляет к конвейеру этап поиска, чтобы
+внешней большой модели не нужно было ни искать в платном API, ни читать HTML.
+
+```
+задача → локальная LLM (опционально) → поисковые запросы
+       → локальный метапоиск (SearXNG или DuckDuckGo HTML)
+       → дедуп и ранжирование ссылок
+       → scripts/21_collect_urls.py (fetch → compress → planner → extractor)
+       → один JSON с фактами, evidence и ошибками
+```
+
+Важно: LLM не «гуглит» сама. Она формулирует запросы, а ссылки находит
+метапоисковик. Платные поисковые API не используются.
+
+### Быстрый запуск
+
+```powershell
+# 1. Только поиск ссылок (без GPU-моделей), DDG без ключа:
+.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+  --task "Найди статьи про Obsidian и LLM на Habr" `
+  --provider ddg --search-only --max-results 10 `
+  --out data\reports\links.json
+
+# 2. Полный конвейер: поиск + сбор фактов:
+.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+  --task "Найди статьи про Obsidian и LLM на Habr" `
+  --provider ddg --max-results 10 --max-pages 5 `
+  --out data\reports\search_collected.json
+```
+
+### Локальная LLM для запросов
+
+Поддерживаются Ollama (по умолчанию) и OpenAI-совместимые серверы (LM Studio,
+vLLM). Модель задаётся именем, веса и сервер пользователь ставит отдельно:
+
+```powershell
+# Ollama, модель 3B в Q4 (~2 ГБ VRAM)
+ollama pull qwen2.5:3b
+.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+  --task "Сравни цены на RTX 5060 Ti" `
+  --provider searxng --llm-model qwen2.5:3b `
+  --llm-url http://localhost:11434 --search-only `
+  --out data\reports\links.json
+
+# OpenAI-совместимый сервер
+.\.venv\Scripts\python.exe scripts\22_search_and_collect.py `
+  --task "..." --llm-provider openai --llm-url http://localhost:1234 `
+  --llm-model local-model --search-only --out data\reports\links.json
+```
+
+Если LLM недоступна или вернула мусор, скрипт честно пишет warning и использует
+саму задачу как запрос. Без `--llm-model` локальная LLM не нужна.
+
+### Поисковые провайдеры
+
+- `--provider searxng --searxng-url http://localhost:8080` — рекомендуется.
+  SearXNG агрегирует публичные движки и отдаёт JSON без ключей и оплаты.
+  В `settings.yml` экземпляра должен быть включён `formats: [html, json]`.
+  Проще всего поднять локально через Docker; публичные инстансы часто
+  ограничивают JSON.
+- `--provider ddg` — HTML-эндпоинт DuckDuckGo без ключа. Работает без
+  установки, но нестабилен и может отдавать 429/ captcha при частых запросах.
+
+### Что в JSON
+
+К отчёту коллектора добавляется блок `search`:
+
+```json
+{
+  "task": "...",
+  "pages": [{"url": "...", "status": "ok", "facts": [...], "missing": [...]}],
+  "aggregate": {"https://...": {"facts": {"title": "..."}}},
+  "stats": {"requested": 5, "ok": 4, "failed": 1, "by_status": {"ok": 4, "fetch_error": 1}},
+  "search": {
+    "provider": "ddg",
+    "query_source": "ollama:qwen2.5:3b",
+    "queries": ["..."],
+    "candidates": [{"url": "...", "title": "...", "snippet": "...", "score": 0.42}],
+    "count": 10,
+    "warnings": [],
+    "collector_error": null
+  }
+}
+```
+
+`--search-only` возвращает только `task`, `generated_at`, пустые `pages`/`stats`
+и блок `search` — удобно, чтобы большая модель выбрала ссылки сама.
+
+### Ограничения
+
+- Поиск — это метапоиск/скрапинг публичных страниц, не официальный Google API.
+  Возможны блокировки, лимиты и разное качество выдачи.
+- 4 ГБ VRAM: не держите Ollama с 3B/7B и конвейер 0.5B одновременно. Надёжный
+  путь — сначала `--search-only`, затем выгрузить LLM (`ollama stop <model>`)
+  и запустить `21_collect_urls.py` по сохранённому списку ссылок.
+- Коллектор по-прежнему берёт ровно переданные URL: без JS/SPA, антибота,
+  пагинации и обхода сайта. Одна ссылка = одна страница.
+- robots.txt, паузы и таймауты соблюдаются на этапе сбора; поисковые запросы
+  идут на публичные эндпоинты провайдера.
