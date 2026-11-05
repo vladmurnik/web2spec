@@ -196,24 +196,95 @@ FIELD_WHY = {
     "count": "количество записей",
 }
 
-SUBSETS = {
-    "compare": {
-        "title",
-        "price",
-        "currency",
-        "availability",
-        "brand",
-        "rating",
-        "review_count",
-        "area",
-        "rooms",
-        "address",
+# Plans are task-driven, not page-driven.  A requested field stays in the plan
+# even when this particular page does not expose it: the extractor marks it
+# missing.  This keeps the planner gold consistent with the instruction.
+INTENT_FIELDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "article": {
+        "monitor": ("title", "author", "published_at"),
+        "research": ("title", "author", "section", "description"),
+        "enrich": (
+            "title",
+            "author",
+            "description",
+            "published_at",
+            "modified_at",
+            "section",
+        ),
+        "negative": (),
     },
-    "filter": {"title", "price", "availability", "location", "salary", "rooms", "area"},
-    "enrich": SCALAR_KEYS,
-    "monitor": {"title", "published_at", "modified_at", "posted_at", "price", "availability"},
-    "research": {"title", "author", "section", "description", "published_at"},
-    "negative": set(),
+    "job": {
+        "enrich": (
+            "title",
+            "company",
+            "location",
+            "salary",
+            "posted_at",
+            "employment_type",
+        ),
+        "filter": ("title", "salary", "location"),
+        "monitor": ("title", "company", "posted_at"),
+        "compare": ("title", "company", "location", "salary"),
+        "research": ("title", "company", "location", "salary", "employment_type"),
+        "negative": (),
+    },
+    "product": {
+        "compare": (
+            "title",
+            "brand",
+            "price",
+            "currency",
+            "availability",
+            "rating",
+            "review_count",
+        ),
+        "filter": ("title", "price", "availability"),
+        "enrich": (
+            "title",
+            "brand",
+            "price",
+            "currency",
+            "sku",
+            "availability",
+            "rating",
+            "review_count",
+        ),
+        "monitor": ("title", "price", "availability"),
+        "research": ("title", "brand", "price", "rating"),
+        "negative": (),
+    },
+    "realestate": {
+        "compare": ("title", "address", "price", "currency", "area", "rooms"),
+        "filter": ("title", "price", "area", "rooms"),
+        "enrich": ("title", "address", "area", "rooms", "price", "currency"),
+        "research": ("title", "address", "price", "area", "rooms"),
+        "negative": (),
+    },
+}
+
+FIELD_KINDS = {
+    "title": "text",
+    "author": "text",
+    "description": "text",
+    "section": "text",
+    "published_at": "date",
+    "modified_at": "date",
+    "posted_at": "date",
+    "company": "text",
+    "location": "text",
+    "salary": "number",
+    "employment_type": "text",
+    "price": "number",
+    "currency": "text",
+    "availability": "text",
+    "brand": "text",
+    "sku": "text",
+    "rating": "number",
+    "review_count": "number",
+    "address": "text",
+    "area": "number",
+    "rooms": "number",
+    "count": "number",
 }
 
 
@@ -246,11 +317,12 @@ def infer_kind(key: str, value: Any) -> str:
 
 
 def field_entry(key: str, value: Any, required: bool) -> dict[str, Any]:
+    kind = FIELD_KINDS.get(key) if value is None else infer_kind(key, value)
     return {
         "name": key,
         "why": FIELD_WHY.get(key, "поле для выполнения задачи"),
         "required": required,
-        "kind": infer_kind(key, value),
+        "kind": kind or "text",
     }
 
 
@@ -274,17 +346,15 @@ def build_plan(
         for key, value in target.items()
         if key in SCALAR_KEYS and isinstance(value, (str, int, float, bool))
     }
-    wanted = SUBSETS.get(intent, SCALAR_KEYS)
-    keys = [key for key in available if key in wanted]
-    if len(keys) < 2:
-        keys = list(available)
+    wanted = INTENT_FIELDS.get(category, {}).get(intent, ())
+    keys = [key for key in wanted if key in available or key in FIELD_KINDS]
     keys = keys[:12]
     if not keys:
         return empty_plan("Нет подходящих данных" if lang == "ru" else "No relevant data")
 
     fields = [
-        field_entry(key, available[key], required=(key == "title" or index == 0))
-        for index, key in enumerate(keys)
+        field_entry(key, available.get(key), required=(key == "title"))
+        for key in keys
     ]
     filters: dict[str, str] = {}
     if intent == "filter" and "availability" in available:
