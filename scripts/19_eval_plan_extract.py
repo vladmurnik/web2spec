@@ -228,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=384)
+    parser.add_argument("--save-predictions", type=Path, default=None)
     args = parser.parse_args(argv)
 
     samples = load_samples(args.data)
@@ -246,6 +247,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = score(predictions, samples)
+    if args.save_predictions:
+        args.save_predictions.parent.mkdir(parents=True, exist_ok=True)
+        with args.save_predictions.open("w", encoding="utf-8", newline="\n") as handle:
+            for sample in samples:
+                row = {"id": sample.id, "output": predictions.get(sample.id, "")}
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     summary = {key: value for key, value in result.items() if key != "details"}
