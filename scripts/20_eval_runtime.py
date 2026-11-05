@@ -30,6 +30,7 @@ from web2spec.plan import (  # noqa: E402
     CollectionPlan,
     PlanError,
     load_factset,
+    load_factset_lenient,
     load_plan,
     repair_factset,
     validate_factset,
@@ -277,7 +278,11 @@ def evaluate(
             if parsed is not None:
                 counters["factset_json_valid"] += 1
             try:
-                factset = load_factset(parsed) if parsed is not None else None
+                factset = (
+                    load_factset_lenient(parsed, dropped_facts)
+                    if parsed is not None
+                    else None
+                )
                 if factset is not None:
                     counters["factset_valid"] += 1
                     if repair:

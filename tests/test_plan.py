@@ -13,6 +13,7 @@ from web2spec.plan import (
     empty_plan,
     fact_target,
     load_factset,
+    load_factset_lenient,
     load_plan,
     plan_target,
     repair_factset,
@@ -196,6 +197,36 @@ def test_factset_rejects_overlap() -> None:
                 "missing": ["price"],
             }
         )
+
+
+def test_load_factset_lenient_removes_overlap_and_placeholder() -> None:
+    dropped: list[dict] = []
+    factset = load_factset_lenient(
+        {
+            "facts": [
+                {"name": "price", "value": 1, "evidence": "1"},
+                {"name": "поле_плана", "value": "x", "evidence": "x"},
+            ],
+            "missing": ["price", "model"],
+        },
+        dropped,
+    )
+    assert [fact.name for fact in factset.facts] == ["price"]
+    assert factset.missing == ["model"]
+    assert dropped[0]["reason"] == "invalid_name"
+
+
+def test_repair_factset_drops_field_outside_plan() -> None:
+    plan = load_plan(_plan_dict())
+    html = "<span>89 560</span>"
+    factset = FactSet(
+        facts=[Fact(name="unknown_field", value="x", evidence="x")],
+        missing=[],
+    )
+    repaired, changes, dropped = repair_factset(factset, plan, html)
+    assert changes == []
+    assert dropped[0]["reason"] == "outside_plan"
+    assert repaired.facts == []
 
 
 def test_factset_rejects_duplicate_facts() -> None:

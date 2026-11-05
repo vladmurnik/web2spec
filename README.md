@@ -12,7 +12,7 @@
 | Сжатие HTML и токенизация | готово |
 | Валидация, дедуп, group-aware splits, CLI | готово |
 | QLoRA-обучение (dataset, trainer, smoke-режим) | готово, проверено dry-run |
-| Слияние адаптера и конвертация в GGUF | готово |
+| Слияние адаптера и конвертация в GGUF | готово, planner/extractor Q4_K_M проверены |
 | Оценка качества (JSON validity, P/R/F1) | готово |
 | Синтетика через teacher-модель | готово |
 | Сбор реальных страниц по JSON-LD (`08_collect.py`) | готово |
@@ -77,6 +77,7 @@ pwsh scripts/06_serve.ps1
 
 - качает по одному URL за раз (без параллельности), уважает `robots.txt` и `Crawl-delay`;
 - сжимает HTML (`compress_html`, по умолчанию до 12 000 символов) и выкидывает скрипты/стили;
+- сохраняет метаданные страницы (`title`, `author`, `published_at`, `modified_at`, canonical) из `meta`, JSON-LD и `<time datetime>` в компактный header перед контентом, чтобы даты не терялись при сжатии;
 - planner → extractor одним merged-модельным проходом каждый, на 4 GB GPU (float16);
 - `repair_factset`: evidence, которого нет в HTML дословно, либо перепривязывается к
   найденному фрагменту, либо поле уходит в `missing`; факты вне плана отбрасываются;
@@ -196,6 +197,32 @@ UTF-8, отступ 2, без HTML:
 (`scripts/03_merge.py` / `02_train.py`). Без них CLI упадёт на загрузке модели;
 чистая логика разбора и валидации тестируется без GPU:
 `.\.venv\Scripts\python.exe -m pytest tests\test_runtime_cli.py -q`.
+
+Для скорости те же модели можно держать в GGUF Q4_K_M и запускать через
+`llama.cpp`. Конвертация (из корня репозитория, `LLAMA_CPP_DIR` указывает на
+клонированный llama.cpp):
+
+```powershell
+pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan `
+  -Name qwen05b-plan -Quant Q4_K_M
+pwsh scripts/04_convert_gguf.ps1 -ModelDir models/merged/qwen05b-plan-extract-v2 `
+  -Name qwen05b-plan-extract-v2 -Quant Q4_K_M
+```
+
+Затем оценка:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\24_eval_q4km.py --limit 50 `
+  --planner models\gguf\qwen05b-plan-Q4_K_M.gguf `
+  --extractor models\gguf\qwen05b-plan-extract-v2-Q4_K_M.gguf `
+  --report data\reports\eval_q4km.json
+```
+
+На 50 held-out страницах Q4_K_M дал ~161–172 ток/с и **101 с на 50 страниц**
+(~2 с на страницу) против 586.7 с у PyTorch float16. Качество на этом узком
+article/Habr-наборе — F1 1.0, 0 неверных значений, но 60 дат ушли в `missing`
+из-за fixture без meta/JSON-LD. Подробности и ограничения — в `docs/STATS.md`.
+MCP-сервер по умолчанию всё ещё использует merged-каталоги, не GGUF.
 
 ## Локальный поиск: задача → ссылки → данные
 

@@ -39,7 +39,7 @@ from web2spec.html_compress import compress_html  # noqa: E402
 from web2spec.plan import (  # noqa: E402
     FactSet,
     PlanError,
-    load_factset,
+    load_factset_lenient,
     load_plan,
     repair_factset,
     validate_factset,
@@ -174,14 +174,24 @@ def assemble_page(
         return page
 
     try:
-        factset = load_factset(extract_json(fact_raw))
+        pre_dropped: list[dict[str, Any]] = []
+        factset = load_factset_lenient(extract_json(fact_raw), pre_dropped)
     except (PlanError, TypeError) as exc:
         page["status"] = "extract_error"
         page["error"] = str(exc)
         return page
 
     factset, repaired, dropped = repair_factset(factset, plan, compressed)
-    page["repairs"] = {"evidence": repaired, "dropped": dropped}
+    page["repairs"] = {"evidence": repaired, "dropped": pre_dropped + dropped}
+    for row in pre_dropped + dropped:
+        if row.get("reason") in {"outside_plan", "invalid_name"}:
+            page["dropped_foreign"].append(
+                {
+                    "name": row.get("name"),
+                    "value": row.get("value"),
+                    "evidence": row.get("evidence"),
+                }
+            )
 
     plan_names = {field.name for field in plan.fields}
     kept_facts = []

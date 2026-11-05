@@ -205,9 +205,7 @@ class FactSet(BaseModel):
         return self
 
 
-def load_factset(raw: Any) -> FactSet:
-    """Parse a FactSet from a dict, a wrapped ``{"factset": ...}`` dict, or JSON."""
-
+def _factset_payload(raw: Any) -> dict[str, Any]:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -217,8 +215,86 @@ def load_factset(raw: Any) -> FactSet:
         raise PlanError("fact set must be a JSON object")
     if set(raw) == {"factset"} and isinstance(raw["factset"], dict):
         raw = raw["factset"]
+    return raw
+
+
+def load_factset(raw: Any) -> FactSet:
+    """Parse a FactSet from a dict, a wrapped ``{"factset": ...}`` dict, or JSON."""
+
+    raw = _factset_payload(raw)
     try:
         return FactSet.model_validate(raw)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first["loc"]) or "<root>"
+        raise PlanError(f"{location}: {first['msg']}") from exc
+
+
+def load_factset_lenient(
+    raw: Any, dropped: list[dict[str, Any]] | None = None
+) -> FactSet:
+    """Parse model output while removing contradictions before validation.
+
+    Small quantized models often put the same field in both ``facts`` and
+    ``missing``, or emit a placeholder instead of a plan field.  The fact is
+    authoritative; overlapping ``missing`` entries are removed.  Facts with
+    invalid names are dropped and optionally recorded.  The strict
+    ``validate_factset`` still checks plan coverage and exact evidence later.
+    """
+
+    raw = _factset_payload(raw)
+    facts_raw = raw.get("facts", [])
+    missing_raw = raw.get("missing", [])
+    if not isinstance(facts_raw, list):
+        facts_raw = []
+    if not isinstance(missing_raw, list):
+        missing_raw = []
+
+    facts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in facts_raw:
+        if not isinstance(item, dict):
+            if dropped is not None:
+                dropped.append({"name": None, "reason": "malformed_fact"})
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not _NAME_RE.match(name):
+            if dropped is not None:
+                dropped.append(
+                    {
+                        "name": name,
+                        "value": item.get("value"),
+                        "evidence": item.get("evidence"),
+                        "reason": "invalid_name",
+                    }
+                )
+            continue
+        if name in seen:
+            if dropped is not None:
+                dropped.append(
+                    {
+                        "name": name,
+                        "value": item.get("value"),
+                        "evidence": item.get("evidence"),
+                        "reason": "duplicate",
+                    }
+                )
+            continue
+        seen.add(name)
+        facts.append(item)
+
+    missing: list[str] = []
+    for name in missing_raw:
+        if (
+            isinstance(name, str)
+            and _NAME_RE.match(name)
+            and name not in seen
+            and name not in missing
+        ):
+            missing.append(name)
+
+    try:
+        return FactSet.model_validate({**raw, "facts": facts, "missing": missing})
     except ValidationError as exc:
         first = exc.errors()[0]
         location = ".".join(str(part) for part in first["loc"]) or "<root>"
@@ -269,7 +345,29 @@ def repair_factset(
     missing = list(factset.missing)
     repaired: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for fact in factset.facts:
+        if fact.name not in plan_names:
+            dropped.append(
+                {
+                    "name": fact.name,
+                    "value": fact.value,
+                    "evidence": fact.evidence,
+                    "reason": "outside_plan",
+                }
+            )
+            continue
+        if fact.name in seen:
+            dropped.append(
+                {
+                    "name": fact.name,
+                    "value": fact.value,
+                    "evidence": fact.evidence,
+                    "reason": "duplicate",
+                }
+            )
+            continue
+        seen.add(fact.name)
         if fact.evidence in html:
             kept.append(fact)
             continue
@@ -279,6 +377,13 @@ def repair_factset(
             kept.append(fact.model_copy(update={"evidence": found}))
             continue
         dropped.append({"name": fact.name, "value": fact.value, "evidence": fact.evidence})
-        if fact.name in plan_names and fact.name not in missing:
+        if fact.name not in missing:
             missing.append(fact.name)
+    fact_names = {fact.name for fact in kept}
+    # The model sometimes lists a found field in both facts and missing.  The
+    # fact is authoritative, so drop the contradictory missing entry instead of
+    # rejecting an otherwise valid FactSet.
+    missing = [
+        name for name in missing if name in plan_names and name not in fact_names
+    ]
     return FactSet(facts=kept, missing=missing), repaired, dropped

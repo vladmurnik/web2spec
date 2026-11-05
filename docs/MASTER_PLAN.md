@@ -1,6 +1,6 @@
 # web2spec — общий план развития
 
-**Статус:** 2026-11-05. Документ фиксирует текущее состояние и оба трека: уже обученный extraction и task-conditioned planner + plan-conditioned extractor. Детальный план следующего шага — в [`PLANNER_PLAN.md`](PLANNER_PLAN.md). Исторические документы [`PLAN.md`](PLAN.md) и [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) не переписаны, но их решения по 0.5B, 4 GB и QLoRA остаются в силе.
+**Статус:** 2026-11-06. Документ фиксирует текущее состояние и оба трека: уже обученный extraction и task-conditioned planner + plan-conditioned extractor. Детальный план следующего шага — в [`PLANNER_PLAN.md`](PLANNER_PLAN.md). Исторические документы [`PLAN.md`](PLAN.md) и [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) не переписаны, но их решения по 0.5B, 4 GB и QLoRA остаются в силе.
 
 ---
 
@@ -18,7 +18,7 @@
 | Spec-трек, реальные данные | данные готовы, обучение остановлено | 157 примеров, checkpoint-20 |
 | Planner / task-conditioned extraction | готово | adapter v1 + extractor v2, test fact F1 0.9357 |
 | Plan-conditioned extractor v2 | готово | reliable-label датасет 1942, merged 942 MB |
-| Runtime-каскад / repair buffer | следующий этап | P6 |
+| Runtime-каскад / repair buffer | готово, Q4_K_M проверен | P6, `scripts/24_eval_q4km.py` |
 
 ### Честная оценка extraction
 
@@ -102,11 +102,18 @@ HTML → JSON по фиксированной схеме. Остаётся produ
 | M6 | Runtime-каскад + repair buffer | 50 задач, success ≥ 70% | выполнено: 94% (прокси), F1 0.9388 |
 | M7 | Опционально: 1.5B Coder / code track | pass@1 на execution-фикстурах | заморожено |
 | M8 | MCP-сервер: внешняя модель → задача → факты | stdio, `collect`/`search_links`, живой smoke, изоляция stdout | выполнено: 13 тестов, реальный `collect` на Habr |
+| M9 | Q4_K_M GGUF для planner/extractor | те же 50 задач, quality/speed отчёт | выполнено: 100% success, F1 1.0, ~161–172 ток/с; ограничения в `STATS.md` |
 
 M8 не меняет качество извлечения: это транспорт и упаковка. Большая модель
 вызывает `collect(task=...)`, сервер локально делает поиск, загрузку и извлечение,
 а наружу отдаёт только компактный JSON без HTML. Если ссылки уже есть, они
 передаются в `urls`, и поиск пропускается.
+
+M9 — это тот же runtime-каскад, но planner и extractor запускаются как Q4_K_M
+GGUF через `llama-server`. На 50 held-out страницах: task success 100%,
+fact F1 1.0, 0 неверных значений, 101 с на 50 страниц (~2 с на страницу).
+Это узкий article/Habr-набор: 60 дат ушли в `missing`, 51 поле плана оказалось
+вне gold-плана; перенос на другие хосты не измерен.
 
 Каждый этап заканчивается отчётом и commit'ом. Обучение запускается только после явного разрешения.
 
