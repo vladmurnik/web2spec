@@ -298,3 +298,125 @@ ollama pull qwen2.5:3b
   пагинации и обхода сайта. Одна ссылка = одна страница.
 - robots.txt, паузы и таймауты соблюдаются на этапе сбора; поисковые запросы
   идут на публичные эндпоинты провайдера.
+
+## MCP-сервер: любая модель → задача → факты
+
+`scripts/23_mcp_server.py` — это готовый MCP-сервер (stdio), который подключается
+к Claude Desktop, Cursor, Cline, Continue или любому другому MCP-клиенту. Большая
+модель по API пишет только задачу, а сервер локально делает всё остальное:
+
+```
+большая модель (MCP-клиент)
+  → tool collect(task="что найти")
+  → локальная LLM формулирует поисковые запросы (опционально)
+  → локальный метапоиск ищет ссылки (SearXNG или DDG, без платных API)
+  → страницы скачиваются и сжимаются
+  → маленькие модели planner + extractor достают факты
+  → большая модель получает компактный JSON: факты, missing, ошибки
+```
+
+HTML, сырые страницы и полные тексты наружу не отдаются. Модель-клиент платит
+токены только за нужные поля.
+
+### Инструменты
+
+| Инструмент | Что делает |
+| --- | --- |
+| `collect` | Главный инструмент: `task` → поиск → скачивание → факты. Если передан `urls`, поиск пропускается и обрабатываются только эти ссылки. |
+| `search_links` | Только поиск ссылок, без скачивания и моделей. Удобно, если большая модель хочет сама выбрать URL. |
+
+Параметры `collect`:
+
+- `task` (обязательный) — что найти, обычным текстом;
+- `urls` — необязательный список URL;
+- `max_results` — сколько ссылок взять из поиска (по умолчанию 10);
+- `max_pages` — сколько страниц обработать (по умолчанию 8);
+- `include_evidence` — добавить точные цитаты `evidence` (по умолчанию `false`,
+  чтобы не тратить токены).
+
+Пример ответа `collect` (по одной странице):
+
+```json
+{
+  "task": "Track new articles, their authors, and publication dates.",
+  "pages": [
+    {
+      "url": "https://habr.com/ru/articles/...",
+      "status": "ok",
+      "entity": "article",
+      "facts": {"title": "Как я оформляю тренировки и питание в Obsidian"},
+      "missing": ["published_at"],
+      "error": null
+    }
+  ],
+  "stats": {"requested": 1, "ok": 1, "failed": 0, "by_status": {"ok": 1}},
+  "search": {"provider": "searxng", "queries": ["..."], "warnings": []}
+}
+```
+
+Если поле не найдено, оно попадает в `missing`, а не выдумывается. `status`
+может быть `ok`, `fetch_error`, `plan_error` или `extract_error`.
+
+### Подключение
+
+1. Собери окружение и модели (см. разделы выше).
+2. Скопируй `configs/mcp.example.json` в конфиг клиента и замени пути.
+3. Перезапусти клиент — появятся инструменты `collect` и `search_links`.
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "web2spec": {
+      "command": "C:\\path\\to\\repo\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\repo\\scripts\\23_mcp_server.py"],
+      "env": {
+        "WEB2SPEC_PROVIDER": "ddg",
+        "WEB2SPEC_LLM_MODEL": "qwen2.5:3b",
+        "WEB2SPEC_LLM_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+```
+
+Cursor: тот же блок в `~/.cursor/mcp.json` (или в настройках MCP). Для любого
+другого клиента достаточно запустить `python scripts\23_mcp_server.py` как
+stdio-процесс.
+
+### Настройки через переменные окружения
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `WEB2SPEC_PROVIDER` | `searxng` | `searxng` или `ddg` |
+| `WEB2SPEC_SEARXNG_URL` | `http://localhost:8080` | адрес SearXNG с JSON |
+| `WEB2SPEC_LLM_MODEL` | пусто | модель для запросов; без неё используется текст задачи |
+| `WEB2SPEC_LLM_URL` | `http://localhost:11434` | Ollama или OpenAI-совместимый сервер |
+| `WEB2SPEC_LLM_PROVIDER` | `ollama` | `ollama` или `openai` |
+| `WEB2SPEC_LANGUAGE` | `ru` | язык поисковой выдачи |
+| `WEB2SPEC_PLANNER` | `models/merged/qwen05b-plan` | путь к planner |
+| `WEB2SPEC_EXTRACTOR` | `models/merged/qwen05b-plan-extract-v2` | путь к extractor |
+| `WEB2SPEC_MAX_CHARS` | `12000` | сколько символов страницы видит модель |
+| `WEB2SPEC_TIMEOUT` | `20` | таймаут загрузки страницы, секунды |
+| `WEB2SPEC_DELAY` | `1.0` | пауза между страницами, секунды |
+| `WEB2SPEC_HTML_DIR` | пусто | если задан, страницы читаются из локальных HTML вместо сети (офлайн-тесты) |
+
+Те же значения можно передать аргументами сервера (`--provider`, `--llm-model`,
+`--planner` и т.д.) — они переопределяют окружение.
+
+### Проверка
+
+```powershell
+# 13 тестов протокола и инструментов, без GPU и сети:
+.\.venv\Scripts\python.exe -m pytest tests\test_mcp_server.py -q
+
+# Живой smoke только поиска (без моделей):
+.\.venv\Scripts\python.exe scripts\23_mcp_server.py
+# затем в клиенте вызвать search_links(task="...")
+```
+
+Сервер пишет диагностику только в stderr, stdout остаётся чистым JSON-RPC.
+Один вызов `collect` загружает 0.5B модели и занимает заметное время; при 4 ГБ
+VRAM не держите одновременно Ollama с 3B/7B и конвейер. Схема: `search_links` →
+`ollama stop <model>` → `collect` с готовыми `urls`.
