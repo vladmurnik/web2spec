@@ -19,6 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from web2spec.evidence import find_evidence
+
 PLAN_VERSION = 1
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 MAX_FIELDS = 12
@@ -249,3 +251,34 @@ def validate_factset(factset: FactSet, plan: CollectionPlan, html: str) -> FactS
 
 def fact_key_set(factset: FactSet) -> set[str]:
     return {fact.name for fact in factset.facts}
+
+
+def repair_factset(
+    factset: FactSet, plan: CollectionPlan, html: str
+) -> tuple[FactSet, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Deterministically repair model evidence, then re-validate.
+
+    A fact whose evidence is not an exact HTML substring keeps its value only
+    when ``find_evidence`` can ground it again.  Otherwise the field becomes a
+    ``missing`` entry, so the final FactSet is always verifiable and never
+    contains fabricated evidence.
+    """
+
+    plan_names = {field.name for field in plan.fields}
+    kept: list[Fact] = []
+    missing = list(factset.missing)
+    repaired: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for fact in factset.facts:
+        if fact.evidence in html:
+            kept.append(fact)
+            continue
+        found = find_evidence(html, fact.value, key=fact.name)
+        if found is not None:
+            repaired.append({"name": fact.name, "old": fact.evidence, "new": found})
+            kept.append(fact.model_copy(update={"evidence": found}))
+            continue
+        dropped.append({"name": fact.name, "value": fact.value, "evidence": fact.evidence})
+        if fact.name in plan_names and fact.name not in missing:
+            missing.append(fact.name)
+    return FactSet(facts=kept, missing=missing), repaired, dropped

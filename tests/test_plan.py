@@ -15,6 +15,7 @@ from web2spec.plan import (
     load_factset,
     load_plan,
     plan_target,
+    repair_factset,
     validate_factset,
 )
 from web2spec.schema import SampleError, load_task_schemas, validate_sample
@@ -305,3 +306,34 @@ def test_plan_extract_prompt_uses_plan() -> None:
     assert PLAN_EXTRACT_SYSTEM_PROMPT in prompt
     assert '"entity":"product"' in prompt
     assert "HTML:" in prompt
+
+
+def test_repair_factset_regrounds_value() -> None:
+    plan = load_plan(_plan_dict())
+    html = "<span>89 560 ₽</span>"
+    factset = FactSet(
+        facts=[Fact(name="price", value=89560, evidence="89560")],
+        missing=["model"],
+    )
+    repaired, changes, dropped = repair_factset(factset, plan, html)
+    assert changes and dropped == []
+    assert repaired.facts[0].evidence in html
+    validate_factset(repaired, plan, html)
+
+
+def test_repair_factset_moves_ungrounded_fact_to_missing() -> None:
+    plan = load_plan(_plan_dict())
+    html = "<span>RTX 5060 Ti</span>"
+    factset = FactSet(
+        facts=[
+            Fact(name="model", value="RTX", evidence="RTX 5060 Ti"),
+            Fact(name="price", value=1, evidence="not-on-page"),
+        ],
+        missing=[],
+    )
+    repaired, changes, dropped = repair_factset(factset, plan, html)
+    assert changes == []
+    assert [row["name"] for row in dropped] == ["price"]
+    assert repaired.missing == ["price"]
+    assert [fact.name for fact in repaired.facts] == ["model"]
+    validate_factset(repaired, plan, html)

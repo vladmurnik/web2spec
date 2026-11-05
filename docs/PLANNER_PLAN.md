@@ -1,6 +1,6 @@
 # План следующего шага: task-conditioned planner
 
-**Статус:** 05.11.2026. P0–P5 выполнены: planner принят на checkpoint-50 (val field F1 **0.8220**, test 136 **0.7714**). Plan-conditioned extractor v2 обучен на reliable-label датасете и принят: test 90 (held-out Habr) fact F1 **0.9357**, evidence rate **0.9524**, missing accuracy **0.9118**, JSON valid 0.9444 — порог P5 (fact F1 ≥ 0.70) пройден с запасом. Следующий этап — P6 (runtime-каскад + repair buffer).
+**Статус:** 05.11.2026. P0–P6 выполнены. Planner принят на checkpoint-50 (val field F1 **0.8220**, test 136 **0.7714**). Plan-conditioned extractor v2 обучен на reliable-label датасете и принят: test 90 (held-out Habr) fact F1 **0.9357**, evidence rate **0.9524**, missing accuracy **0.9118**, JSON valid 0.9444. Runtime-каскад planner → extractor → validator → repair на 50 задачах: task success **94%** (47/50), fact F1 **0.9388**, 0 неверных значений после валидатора. Следующий шаг — расширение runtime-eval на другие сущности/хосты и teacher fallback.
 
 **Связанные документы:** [`MASTER_PLAN.md`](MASTER_PLAN.md) — общий roadmap; [`STATS.md`](STATS.md) — текущие данные; [`SPEC_TRACK.md`](SPEC_TRACK.md) — результаты spec-трека.
 
@@ -274,7 +274,36 @@ HTML-фрагмент:
 - pages crawled;
 - repair rate.
 
-### 7.3 Baselines
+### 7.3 Runtime-каскад, 50 задач (P6)
+
+Прогон `scripts/20_eval_runtime.py`: 50 пар задача+страница из held-out
+`data/plan_extract/test.jsonl` (18 URL, 6 задач, Habr article), planner
+генерирует план, extractor — FactSet, затем детерминированный валидатор
+перепроверяет evidence и переносит недоказуемые факты в `missing`.
+
+Task success считается детерминированно: валидный план + совпадение entity +
+все required-поля плана присутствуют + FactSet валиден (evidence точен,
+покрытие полное) + все required-факты совпали + нет неверных значений.
+Ручная оценка 50 задач не проводилась — это прокси, а не замена ручному аудиту.
+
+| Метрика | Значение |
+|---|---:|
+| Task success | **94.0%** (47/50) |
+| Валидный план | 100% |
+| Entity accuracy | 100% |
+| Required recall | 100% |
+| FactSet strict valid после repair | 100% |
+| Fact F1 (сопоставимые поля) | **0.9388** |
+| Неверные значения | 0 |
+| Перенесено в missing валидатором | 70 фактов (published_at 48, modified_at 17, title 3, section 2) |
+| Записей в repair buffer | 48 |
+
+3 провала — одна и та же страница, где extractor исказил title
+(«вендорнойподдержки» вместо «вендорскойподдержки»); валидатор честно убрал
+факт в `missing`, поэтому задача не засчитана. `published_at`/`modified_at`
+часто отсутствуют в сжатом HTML — это ограничение компрессии, а не repair.
+
+### 7.4 Baselines
 
 1. Текущий extraction с фиксированной схемой.
 2. Planner-teacher без student.
@@ -312,7 +341,7 @@ Confidence без logits оцениваем косвенно: schema validity, �
 | P3 | Smoke + обучение planner | adapter `qwen05b-plan-v1` | val F1 ≥ 0.75 |
 | P4 | Eval + error analysis | `data/reports/eval_plan.json` | отчёт с примерами ошибок |
 | P5 | Plan-conditioned extractor | adapter `qwen05b-plan-extract-v2` | fact F1 ≥ 0.70 — **выполнено: 0.9357** |
-| P6 | Runtime + repair buffer | `scripts/18_serve_plan.py` | 50 задач, success ≥ 70% |
+| P6 | Runtime + repair buffer | `scripts/20_eval_runtime.py` | 50 задач, success ≥ 70% — **выполнено: 94% (прокси)** |
 
 Обучение на P3/P5 запускается только после отдельного разрешения.
 
@@ -326,6 +355,8 @@ src/web2spec/tokens.py           build_plan_prompt, build_plan_extract_prompt
 scripts/15_make_plan_tasks.py    задача + страница → tasks.jsonl
 scripts/16_distill_plans.py      teacher → plans.jsonl, cache, retries
 scripts/17_eval_plan.py          plan metrics + end-to-end
+scripts/19_eval_plan_extract.py  plan-conditioned extractor metrics
+scripts/20_eval_runtime.py       planner → extractor → validator, repair buffer
 configs/data_plan.yaml           пути, split, seq 1536
 configs/train_plan_4gb.yaml      QLoRA-пресет planner
 configs/eval_plan.yaml           model_dir, data, report

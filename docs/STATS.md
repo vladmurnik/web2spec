@@ -201,6 +201,30 @@ r16/alpha32, batch1/accum16; train_loss 0.0271, eval_loss 0.0101 (checkpoint-50
 Ограничение: test состоит только из article/Habr, поэтому перенос на job,
 product, realestate и другие хосты этим прогоном не измерен.
 
+### Runtime-каскад, 50 задач (planner → extractor → validator)
+
+50 пар задача+страница из held-out test: 18 URL, 6 задач. План генерирует
+planner v1, факты — extractor v2; валидатор детерминированно проверяет evidence
+и переносит недоказуемые факты в `missing`.
+
+| Метрика | Значение |
+|---|---:|
+| Task success (прокси) | **94.0%** (47/50) |
+| Валидный план | 100% |
+| Entity accuracy | 100% |
+| Required recall | 100% |
+| FactSet strict valid после repair | 100% |
+| Fact F1 | 93.88% |
+| Неверные значения | 0 |
+| Фактов перенесено в missing | 70 |
+| Записей в repair buffer | 48 |
+
+Переносы: published_at 48, modified_at 17, title 3, section 2 — в основном
+дат нет в сжатом HTML. 3 провала — extractor исказил title на одной и той же
+странице; валидатор честно убрал факт, и required-поле не было доставлено.
+Ручной аудит не проводился; success — детерминированный прокси, не замена
+ручной оценке.
+
 ### Spec, синтетический test 60
 
 `spec_valid=1.0`, `exec=1.0`, `page_exact=1.0`, `F1=1.0`.

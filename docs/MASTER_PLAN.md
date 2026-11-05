@@ -79,9 +79,9 @@ HTML → JSON по фиксированной схеме. Остаётся produ
 
 Тот же HTML, но target — facts с именами из плана, а не глобальная схема. Нужен, чтобы план действительно управлял извлечением, а не оставался текстом. v2 на reliable-label данных: test 90 fact F1 0.9357, evidence rate 0.9524, missing accuracy 0.9118. Ограничение — test только article/Habr.
 
-### Track D — runtime (следующий)
+### Track D — runtime (готов, базовый прокси)
 
-Каскад: planner → extractor → validator → teacher fallback. Ошибки сохраняются в буфер для дообучения.
+Каскад: planner → extractor → validator → teacher fallback. Ошибки сохраняются в буфер для дообучения. Базовый прогон на 50 задачах: task success 94% (47/50), fact F1 0.9388, 0 неверных значений; 48 фактов ушли в repair buffer. Teacher fallback ещё не подключён, ручного аудита не было — success измерен детерминированным прокси.
 
 ### Track E — code generation (заморожен)
 
@@ -99,7 +99,7 @@ HTML → JSON по фиксированной схеме. Остаётся produ
 | M3 | Обучение planner-адаптера | val plan F1 ≥ 0.75, entity ≥ 0.85 | выполнено: F1 0.8220 |
 | M4 | Eval на unseen hosts/tasks | end-to-end fact F1 ≥ 0.60 | частично: test F1 0.7714/0.9357 на Habr, другие хосты не покрыты |
 | M5 | Plan-conditioned extractor | F1 ≥ 0.70 на своих хостах | выполнено: fact F1 0.9357 |
-| M6 | Runtime-каскад + repair buffer | 50 задач, success ≥ 70% | следующий этап |
+| M6 | Runtime-каскад + repair buffer | 50 задач, success ≥ 70% | выполнено: 94% (прокси), F1 0.9388 |
 | M7 | Опционально: 1.5B Coder / code track | pass@1 на execution-фикстурах | заморожено |
 
 Каждый этап заканчивается отчётом и commit'ом. Обучение запускается только после явного разрешения.
