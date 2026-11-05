@@ -15,7 +15,9 @@ import argparse
 import gc
 import json
 import re
+import statistics
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -98,10 +100,22 @@ def generate(
     build_prompt,
     max_new_tokens: int,
     label: str,
+    stats: dict[str, Any] | None = None,
 ) -> dict[str, str]:
+    """Generate one model's outputs and optionally record per-sample timings.
+
+    ``stats`` is filled in place: each sample id maps to prompt/generated token
+    counts and wall-clock seconds for ``model.generate`` only.  Keys starting
+    with ``_`` hold model-level measurements (load time, peak VRAM).
+    """
+
     import torch
     from transformers import AutoModelForCausalLM
 
+    if stats is not None and torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+    load_started = time.perf_counter()
     tokenizer = load_tokenizer(model_dir)
     kwargs: dict[str, Any] = {"dtype": torch.float16}
     if torch.cuda.is_available():
@@ -109,12 +123,20 @@ def generate(
         kwargs["attn_implementation"] = "sdpa"
     model = AutoModelForCausalLM.from_pretrained(model_dir, **kwargs)
     model.eval()
+    if stats is not None:
+        stats["_load_seconds"] = time.perf_counter() - load_started
+
     output: dict[str, str] = {}
     try:
         for index, sample in enumerate(samples, 1):
+            prompt_started = time.perf_counter()
             prompt = build_prompt(sample, tokenizer)
             inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
             inputs = {key: value.to(model.device) for key, value in inputs.items()}
+            prompt_seconds = time.perf_counter() - prompt_started
+            prompt_tokens = int(inputs["input_ids"].shape[1])
+
+            generate_started = time.perf_counter()
             with torch.inference_mode():
                 generated = model.generate(
                     **inputs,
@@ -122,18 +144,70 @@ def generate(
                     do_sample=False,
                     pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
                 )
+            generate_seconds = time.perf_counter() - generate_started
+            generated_tokens = int(generated.shape[1] - prompt_tokens)
+
             text = tokenizer.decode(
-                generated[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
+                generated[0][prompt_tokens:], skip_special_tokens=True
             )
             output[sample.id] = text
-            print(f"[{label} {index}/{len(samples)}] {sample.id}: {len(text)} chars")
+            if stats is not None:
+                stats[sample.id] = {
+                    "prompt_tokens": prompt_tokens,
+                    "generated_tokens": generated_tokens,
+                    "prompt_seconds": prompt_seconds,
+                    "generate_seconds": generate_seconds,
+                    "tokens_per_second": (
+                        generated_tokens / generate_seconds if generate_seconds else 0.0
+                    ),
+                }
+            print(
+                f"[{label} {index}/{len(samples)}] {sample.id}: {len(text)} chars, "
+                f"{generated_tokens} tok, {generate_seconds:.2f}s"
+            )
     finally:
+        if stats is not None and torch.cuda.is_available():
+            stats["_max_vram_mb"] = torch.cuda.max_memory_allocated() / (1024**2)
         del model
         del tokenizer
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     return output
+
+
+def _p95(values: list[float]) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))]
+
+
+def summarize_timings(stats: dict[str, Any]) -> dict[str, Any]:
+    """Turn per-sample timing rows into one compact speed summary."""
+
+    rows = [row for key, row in stats.items() if not key.startswith("_")]
+    if not rows:
+        return {"samples": 0}
+    seconds = [row["generate_seconds"] for row in rows]
+    generated = sum(row["generated_tokens"] for row in rows)
+    generate_seconds = sum(seconds)
+    prompt_tokens = [row["prompt_tokens"] for row in rows]
+    generated_tokens = [row["generated_tokens"] for row in rows]
+    return {
+        "samples": len(rows),
+        "load_seconds": round(float(stats.get("_load_seconds", 0.0)), 3),
+        "max_vram_mb": round(float(stats.get("_max_vram_mb", 0.0)), 1),
+        "prompt_tokens_total": sum(prompt_tokens),
+        "generated_tokens_total": generated,
+        "generate_seconds_total": round(generate_seconds, 3),
+        "tokens_per_second": round(generated / generate_seconds, 2)
+        if generate_seconds
+        else 0.0,
+        "seconds_per_sample_mean": round(statistics.mean(seconds), 3),
+        "seconds_per_sample_median": round(statistics.median(seconds), 3),
+        "seconds_per_sample_p95": round(_p95(seconds), 3),
+        "prompt_tokens_mean": round(statistics.mean(prompt_tokens), 1),
+        "generated_tokens_mean": round(statistics.mean(generated_tokens), 1),
+    }
 
 
 def evaluate(
@@ -434,8 +508,15 @@ def main(argv: list[str] | None = None) -> int:
             except PlanError:
                 continue
 
+    wall_started = time.perf_counter()
+    plan_timings: dict[str, Any] = {}
     plans = generate(
-        samples, args.planner, build_plan_prompt, args.plan_max_new_tokens, "plan"
+        samples,
+        args.planner,
+        build_plan_prompt,
+        args.plan_max_new_tokens,
+        "plan",
+        stats=plan_timings,
     )
 
     extract_samples: list[Sample] = []
@@ -468,17 +549,24 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
 
+    fact_timings: dict[str, Any] = {}
     factsets = generate(
         extract_samples,
         args.extractor,
         build_plan_extract_prompt,
         args.fact_max_new_tokens,
         "fact",
+        stats=fact_timings,
     )
 
     result = evaluate(
         samples, plans, factsets, gold_plans, args.repair_buffer, repair=not args.no_repair
     )
+    result["speed"] = {
+        "planner": summarize_timings(plan_timings),
+        "extractor": summarize_timings(fact_timings),
+        "wall_seconds": round(time.perf_counter() - wall_started, 3),
+    }
 
     if args.save_predictions:
         args.save_predictions.parent.mkdir(parents=True, exist_ok=True)
