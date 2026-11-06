@@ -1,0 +1,2 @@
+Collect the article title, author and publication date. Keep the original
+language of the page. If a field is absent, return it in missing.

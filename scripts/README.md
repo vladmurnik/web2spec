@@ -4,6 +4,7 @@ Numbered-скрипты сохранены как воспроизводимый
 работы используйте единый CLI `web2spec`; он вызывает те же файлы.
 
 ```powershell
+web2spec download-models --only all
 web2spec doctor
 web2spec collect --task "..." --urls data/urls.txt
 web2spec search --task "..." --provider ddg
@@ -15,6 +16,7 @@ web2spec mcp
 
 | Скрипт | Назначение |
 |---|---|
+| `00_download_models.py` | скачивание GGUF и проверка SHA-256 |
 | `01_validate.py` | нормализация JSONL, валидация, дедуп, splits |
 | `02_train.py` | QLoRA-обучение или dry-run |
 | `03_merge.py` | слияние LoRA-адаптера с базовой моделью |
@@ -53,5 +55,5 @@ web2spec mcp
 4. Runtime: `21_collect_urls.py`, `22_search_and_collect.py`,
    `26_research.py`, `23_mcp_server.py`.
 
-`13` и `16` в репозитории отсутствуют: нумерация отражает исторические шаги,
-а не непрерывную последовательность.
+`13`, `16` и `25` в репозитории отсутствуют: нумерация отражает исторические
+шаги, а не непрерывную последовательность.
