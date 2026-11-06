@@ -1,0 +1,5 @@
+# SHA-256 checksums for the runtime GGUF models.
+# Format: <sha256>  <filename>
+3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597  Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+6579c854eec279f8e0f15e00ed27f10f9fff916318e8a8a1cbe9809450dd0a2a  qwen05b-plan-Q4_K_M.gguf
+aa454fbe3dddb32bd6a306e7a1e1fcc6bebb37819e1d18f8c65d6ba4cbd46209  qwen05b-plan-extract-v2-Q4_K_M.gguf

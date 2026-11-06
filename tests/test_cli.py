@@ -10,9 +10,21 @@ def test_version() -> None:
 
 def test_help_lists_main_commands() -> None:
     text = cli._help()
-    for command in ("collect", "search", "research", "mcp", "doctor", "eval-q4"):
+    for command in (
+        "download-models",
+        "collect",
+        "search",
+        "research",
+        "mcp",
+        "doctor",
+        "eval-q4",
+    ):
         assert command in text
     assert "20-50" in text
+
+
+def test_download_models_maps_to_script() -> None:
+    assert cli.COMMANDS["download-models"] == "00_download_models.py"
 
 
 def test_research_maps_to_research_script() -> None:

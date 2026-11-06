@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from web2spec import __version__
 from web2spec.llama_runtime import (
     DEFAULT_ANALYST,
     DEFAULT_EXTRACTOR,
@@ -29,9 +30,10 @@ from web2spec.llama_runtime import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = REPO_ROOT / "scripts"
-VERSION = "0.4.0"
+VERSION = __version__
 
 COMMANDS = {
+    "download-models": "00_download_models.py",
     "collect": "21_collect_urls.py",
     "search": "22_search_and_collect.py",
     "research": "26_research.py",
@@ -54,6 +56,9 @@ def _load(script: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ImportError(f"не удалось загрузить {path}")
     module = importlib.util.module_from_spec(spec)
+    # Register before execution: dataclasses and pickling look the module up in
+    # sys.modules while the script body is still running.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -90,6 +95,7 @@ def _help() -> str:
         "Usage: web2spec <command> [options]",
         "",
         "Commands:",
+        "  download-models   download and verify GGUF runtime models",
         "  collect           task + URLs -> structured facts",
         "  search            task -> local search -> collector facts",
         "  research          task -> 20-50 pages -> evidence report",
