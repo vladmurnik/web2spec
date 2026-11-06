@@ -1,0 +1,47 @@
+name: Bug report
+description: Something failed or returned an invalid result
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove private URLs, API keys and personal data before submitting.
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Exact command, with secrets removed
+      render: powershell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Error text or the smallest JSON output that shows the problem
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, GPU/VRAM, llama.cpp version
+      placeholder: Windows 11, Python 3.12, RTX 3050 Ti 4 GB, llama.cpp b...
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran `web2spec doctor`
+          required: true
+        - label: I removed secrets and private data
+          required: true
