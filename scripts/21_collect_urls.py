@@ -47,7 +47,7 @@ from web2spec.plan import (  # noqa: E402
     FactSet,
     PlanError,
     load_factset_lenient,
-    load_plan,
+    load_plan_lenient,
     repair_factset,
     validate_factset,
 )
@@ -144,17 +144,23 @@ def assemble_page(
     extract_stage_error: str | None = None,
     max_chars: int = 12_000,
     allow_partial: bool = False,
+    task: str = "",
+    html_is_compressed: bool = False,
 ) -> dict[str, Any]:
     """Deterministic part of the cascade: plan + fact JSON -> one page result.
 
-    ``html`` is raw HTML; it is compressed here so the evidence offsets always
-    refer to the text the models actually saw.
+    ``html`` is normally raw HTML and is compressed here so evidence is checked
+    against exactly what the models saw.  The collector already compresses
+    fetched pages, so it passes ``html_is_compressed=True`` to avoid a second
+    lossy pass.
     """
 
     page = _empty_page(url)
     page["status"] = "ok"
 
-    compressed = compress_html(html, max_chars=max_chars)
+    compressed = (
+        html if html_is_compressed else compress_html(html, max_chars=max_chars)
+    )
     if len(compressed) < MIN_HTML_CHARS:
         page["status"] = "fetch_error"
         page["error"] = "compressed HTML is empty or too small"
@@ -165,11 +171,15 @@ def assemble_page(
         page["error"] = plan_stage_error
         return page
 
-    try:
-        plan = load_plan(extract_json(plan_raw))
-    except (PlanError, TypeError) as exc:
+    plan_dropped: list[dict[str, Any]] = []
+    plan = load_plan_lenient(
+        extract_json(plan_raw), task=task, dropped=plan_dropped
+    )
+    if plan is None:
         page["status"] = "plan_error"
-        page["error"] = str(exc)
+        page["error"] = (
+            plan_dropped[0].get("error") if plan_dropped else "invalid plan"
+        )
         return page
 
     page["entity"] = plan.entity
@@ -518,12 +528,12 @@ def _fetch_online(
     return result.html, None
 
 
-def _plan_ok(plan_raw: str) -> bool:
+def _plan_ok(plan_raw: str, task: str) -> bool:
     try:
-        plan = load_plan(extract_json(plan_raw))
+        plan = load_plan_lenient(extract_json(plan_raw), task=task)
     except (PlanError, TypeError):
         return False
-    return bool(plan.fields) and plan.entity != "none"
+    return plan is not None and bool(plan.fields) and plan.entity != "none"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -590,8 +600,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fact-max-new-tokens", type=int, default=384)
     parser.add_argument(
         "--allow-partial",
-        action="store_true",
-        help="не падать, когда часть полей плана не найдена: они уходят в missing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "часть полей плана не найдена → missing вместо ошибки страницы "
+            "(по умолчанию включено; --no-allow-partial — строгая проверка)"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -661,9 +675,11 @@ def main(argv: list[str] | None = None) -> int:
     fact_items: list[tuple[str, str, dict[str, Any]]] = []
     for url, html in items:
         raw = plan_raws.get(url, "")
-        if plan_batch_error is not None or not _plan_ok(raw):
+        if plan_batch_error is not None or not _plan_ok(raw, task):
             continue
-        plan = load_plan(extract_json(raw))
+        plan = load_plan_lenient(extract_json(raw), task=task)
+        if plan is None:
+            continue
         fact_items.append((url, html, plan.model_dump(mode="json")))
 
     fact_raws: dict[str, str] = {}
@@ -695,6 +711,8 @@ def main(argv: list[str] | None = None) -> int:
             extract_stage_error=fact_batch_error,
             max_chars=args.max_chars,
             allow_partial=args.allow_partial,
+            task=task,
+            html_is_compressed=True,
         )
 
     pages = [pages_by_url[url] for url in urls]

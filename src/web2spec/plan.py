@@ -121,6 +121,184 @@ def load_plan(raw: Any) -> CollectionPlan:
     return plan
 
 
+_PLAN_KEYS = {
+    "version",
+    "goal",
+    "entity",
+    "entry",
+    "fields",
+    "filters",
+    "pagination",
+    "detail_pages",
+    "dedup_key",
+    "stop_conditions",
+}
+_KIND_ALIASES = {
+    "text": "text",
+    "string": "text",
+    "str": "text",
+    "number": "number",
+    "numeric": "number",
+    "integer": "number",
+    "int": "number",
+    "float": "number",
+    "date": "date",
+    "datetime": "date",
+    "time": "date",
+    "url": "url",
+    "link": "url",
+    "bool": "bool",
+    "boolean": "bool",
+    "null": "null",
+    "none": "null",
+}
+
+
+def _plan_payload(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise PlanError(f"plan is not JSON: {exc}") from exc
+    if isinstance(raw, list) and len(raw) == 1:
+        raw = raw[0]
+    if not isinstance(raw, dict):
+        raise PlanError("plan must be a JSON object")
+    if set(raw) == {"plan"} and isinstance(raw["plan"], dict):
+        raw = raw["plan"]
+    return raw
+
+
+def _identifier(value: Any, fallback: str) -> str:
+    """Make a model-provided field/entity name satisfy the plan schema."""
+
+    text = re.sub(r"[^a-z0-9_]+", "_", str(value or "").casefold())
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text or not text[0].isalpha():
+        text = fallback
+    return text[:40]
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().casefold()
+        if lowered in {"true", "1", "yes", "да"}:
+            return True
+        if lowered in {"false", "0", "no", "нет"}:
+            return False
+    return default
+
+
+def load_plan_lenient(
+    raw: Any,
+    *,
+    task: str | None = None,
+    dropped: list[dict[str, Any]] | None = None,
+) -> CollectionPlan | None:
+    """Recover a usable plan from common small-model schema mistakes.
+
+    The runtime should not lose a whole page because a 0.5B model wrote
+    ``"kind": "html"``, added an unknown key, or omitted ``goal``.  This
+    function normalizes those recoverable cases, then still validates the
+    result through :class:`CollectionPlan`.  Unrecoverable output returns
+    ``None`` and is recorded in ``dropped`` instead of raising.
+    """
+
+    try:
+        payload = _plan_payload(raw)
+    except PlanError as exc:
+        if dropped is not None:
+            dropped.append({"reason": "invalid_plan", "error": str(exc)})
+        return None
+
+    normalized = {key: payload[key] for key in payload if key in _PLAN_KEYS}
+    goal = str(normalized.get("goal") or task or "collect requested fields").strip()
+    normalized["goal"] = goal[:300] if len(goal) >= 5 else "collect requested fields"
+    normalized["version"] = 1
+
+    fields_raw = normalized.get("fields", [])
+    if isinstance(fields_raw, dict):
+        fields_raw = [fields_raw]
+    if not isinstance(fields_raw, list):
+        fields_raw = []
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(fields_raw, 1):
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            if dropped is not None:
+                dropped.append({"reason": "malformed_field", "index": index})
+            continue
+        raw_name = item.get("name") or item.get("field") or ""
+        name = _identifier(raw_name, f"field_{index}")
+        if name in {"selector", "xpath", "css"} or len(name) < 2:
+            if dropped is not None:
+                dropped.append({"reason": "invalid_field_name", "name": raw_name})
+            continue
+        if name in seen:
+            if dropped is not None:
+                dropped.append({"reason": "duplicate_field", "name": name})
+            continue
+        seen.add(name)
+        why = str(item.get("why") or item.get("description") or "requested by task")
+        why = " ".join(why.split())[:200]
+        kind = _KIND_ALIASES.get(str(item.get("kind") or "text").casefold(), "text")
+        fields.append(
+            {
+                "name": name,
+                "why": why if len(why) >= 3 else "requested by task",
+                "required": _as_bool(item.get("required")),
+                "kind": kind,
+            }
+        )
+    normalized["fields"] = fields[:MAX_FIELDS]
+
+    entity = _identifier(normalized.get("entity") or "page", "page")
+    if entity == "none" and fields:
+        entity = "page"
+    if entity != "none" and not normalized["fields"]:
+        entity = "none"
+    normalized["entity"] = entity
+
+    entry = normalized.get("entry")
+    normalized["entry"] = entry if entry in {"listing", "detail", "search", "sitemap"} else "detail"
+    dedup_key = normalized.get("dedup_key")
+    normalized["dedup_key"] = (
+        dedup_key if dedup_key in {"url", "id", "sku", "title"} else "url"
+    )
+    normalized["pagination"] = _as_bool(normalized.get("pagination"))
+    normalized["detail_pages"] = _as_bool(normalized.get("detail_pages"))
+
+    filters_raw = normalized.get("filters", {})
+    filters: dict[str, str] = {}
+    if isinstance(filters_raw, dict):
+        for key, value in list(filters_raw.items())[:MAX_FILTERS]:
+            key_text = _identifier(key, "")
+            if key_text and isinstance(value, str) and value.strip():
+                filters[key_text] = value.strip()
+    normalized["filters"] = filters
+
+    stops_raw = normalized.get("stop_conditions", [])
+    if not isinstance(stops_raw, list):
+        stops_raw = []
+    stops = [
+        " ".join(str(item).split())[:200]
+        for item in stops_raw
+        if isinstance(item, str) and str(item).strip()
+    ][:MAX_STOP_CONDITIONS]
+    normalized["stop_conditions"] = stops
+
+    try:
+        return CollectionPlan.model_validate(normalized)
+    except ValidationError as exc:
+        if dropped is not None:
+            dropped.append({"reason": "invalid_plan", "error": str(exc)})
+        return None
+
+
 def empty_plan(goal: str) -> CollectionPlan:
     """Canonical negative plan: the page has nothing relevant to the task."""
 

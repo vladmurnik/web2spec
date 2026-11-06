@@ -37,9 +37,9 @@ web2spec mcp
 
 | Скрипт | Назначение |
 |---|---|
-| `21_collect_urls.py` | задача + URL → сжатие → planner → extractor → факты |
-| `22_search_and_collect.py` | задача → запросы → локальный поиск → collector |
-| `23_mcp_server.py` | MCP stdio-сервер: `collect`, `search_links` |
+| `21_collect_urls.py` | задача + URL → сжатие → planner → extractor → факты; lenient-план и `--allow-partial` |
+| `22_search_and_collect.py` | задача → запросы → локальный поиск → collector; `--domain` / `--domains` |
+| `23_mcp_server.py` | MCP stdio-сервер: один инструмент `collect` (поиск + факты) |
 | `24_eval_q4km.py` | тот же runtime-тест на Q4_K_M GGUF |
 
 ## Порядок воспроизведения

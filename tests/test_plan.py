@@ -15,6 +15,7 @@ from web2spec.plan import (
     load_factset,
     load_factset_lenient,
     load_plan,
+    load_plan_lenient,
     plan_target,
     repair_factset,
     validate_factset,
@@ -227,6 +228,54 @@ def test_repair_factset_drops_field_outside_plan() -> None:
     assert changes == []
     assert dropped[0]["reason"] == "outside_plan"
     assert repaired.facts == []
+
+
+def test_load_plan_lenient_recovers_small_model_mistakes() -> None:
+    dropped: list[dict] = []
+    plan = load_plan_lenient(
+        {
+            "goal": "Собрать цены",
+            "entity": "none",
+            "entry": "catalog",
+            "dedup_key": "slug",
+            "mindset": "extra",
+            "fields": [
+                {"name": "Price USD", "kind": "currency", "required": "yes"},
+                {"name": "цена", "kind": "string"},
+            ],
+        },
+        task="найди цены",
+        dropped=dropped,
+    )
+    assert plan is not None
+    assert plan.entity == "page"
+    assert plan.entry == "detail"
+    assert plan.dedup_key == "url"
+    assert [field.name for field in plan.fields] == ["price_usd", "field_2"]
+    assert plan.fields[0].kind == "text"
+    assert plan.fields[0].required is True
+    assert dropped == []
+
+
+def test_load_plan_lenient_fills_missing_goal_and_accepts_wrappers() -> None:
+    plan = load_plan_lenient(
+        [{"fields": [{"name": "title"}]}],
+        task="найди заголовки статей",
+    )
+    assert plan is not None
+    assert plan.goal == "найди заголовки статей"
+    assert [field.name for field in plan.fields] == ["title"]
+    wrapped = load_plan_lenient(
+        {"plan": {"goal": "Собрать заголовки", "fields": [{"name": "title"}]}}
+    )
+    assert wrapped is not None
+    assert wrapped.goal == "Собрать заголовки"
+
+
+def test_load_plan_lenient_returns_none_for_unrecoverable_json() -> None:
+    dropped: list[dict] = []
+    assert load_plan_lenient("not-json", dropped=dropped) is None
+    assert dropped[0]["reason"] == "invalid_plan"
 
 
 def test_factset_rejects_duplicate_facts() -> None:

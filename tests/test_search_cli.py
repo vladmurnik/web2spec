@@ -185,6 +185,64 @@ def test_search_urls_records_provider_errors(monkeypatch) -> None:
     assert warnings and "http 429" in warnings[0]
 
 
+def test_search_urls_filters_and_scopes_domains(monkeypatch) -> None:
+    queries_seen: list[str] = []
+
+    def fake_search(query, **kwargs):
+        queries_seen.append(query)
+        return (
+            [
+                {"url": "https://docs.example.com/a", "title": "A", "snippet": ""},
+                {"url": "https://blog.other.com/b", "title": "B", "snippet": ""},
+            ],
+            None,
+        )
+
+    monkeypatch.setattr(search_cli, "deterministic_queries", lambda task: ["base query"])
+    monkeypatch.setattr(search_cli, "search_searxng", fake_search)
+    block, urls, warnings = search_cli.search_urls(
+        "тарифы",
+        provider="searxng",
+        searxng_url="http://localhost:8080",
+        language="ru",
+        max_results=5,
+        domains=["https://docs.example.com/path"],
+    )
+    assert queries_seen[0] == "тарифы site:docs.example.com"
+    assert urls == ["https://docs.example.com/a"]
+    assert block["domains"] == ["docs.example.com"]
+    assert warnings == []
+
+
+def test_clean_domains_accepts_urls_paths_and_comma_lists() -> None:
+    assert search_cli._clean_domains(
+        ["https://docs.example.com/path", "Sber.ru, cloud.vk.com", "sber.ru"]
+    ) == ["docs.example.com", "sber.ru", "cloud.vk.com"]
+
+
+def test_search_urls_warns_when_domain_has_no_matches(monkeypatch) -> None:
+    monkeypatch.setattr(search_cli, "deterministic_queries", lambda task: ["q"])
+    monkeypatch.setattr(
+        search_cli,
+        "search_searxng",
+        lambda query, **kwargs: (
+            [{"url": "https://other.com/a", "title": "A", "snippet": ""}],
+            None,
+        ),
+    )
+    block, urls, warnings = search_cli.search_urls(
+        "тарифы",
+        provider="searxng",
+        searxng_url="http://localhost:8080",
+        language="ru",
+        max_results=5,
+        domains=["docs.example.com"],
+    )
+    assert urls == []
+    assert block["count"] == 0
+    assert any("no search results matched domains" in item for item in warnings)
+
+
 def test_build_output_merges_search_and_collector() -> None:
     collector = {
         "task": "t",
@@ -267,6 +325,7 @@ def test_collector_argv_passes_urls_and_offline_dir(tmp_path) -> None:
     argv = search_cli._collector_argv(args, ["https://a", "https://b"], tmp_path / "o.json")
     assert argv[1].endswith("21_collect_urls.py")
     assert "--html-dir" in argv
+    assert "--allow-partial" in argv
     assert argv.count("--url") == 2
     assert str(tmp_path) in argv
 

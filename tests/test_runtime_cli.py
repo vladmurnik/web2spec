@@ -179,6 +179,53 @@ def test_assemble_page_empty_plan_is_ok() -> None:
     assert page["missing"] == []
 
 
+def test_assemble_page_recovers_lenient_plan() -> None:
+    plan = {
+        "goal": "Extract product title and price",
+        "extra_key": "ignored",
+        "entity": "none",
+        "fields": [
+            {"name": "title", "kind": "string"},
+            {"name": "price", "kind": "currency", "why": "cost"},
+        ],
+    }
+    page = collect_urls.assemble_page(
+        "https://shop.example/product/mug",
+        HTML,
+        _plan_raw(plan),
+        _facts_raw(
+            [
+                {"name": "title", "value": "Чайник", "evidence": "Чайник"},
+                {"name": "price", "value": 990, "evidence": "990 ₽"},
+            ]
+        ),
+        task="extract product title and price",
+    )
+    assert page["status"] == "ok"
+    assert page["entity"] == "page"
+    assert {fact["name"] for fact in page["facts"]} == {"title", "price"}
+
+
+def test_assemble_page_skips_second_compression(monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise AssertionError("already compressed HTML must not be compressed again")
+
+    monkeypatch.setattr(collect_urls, "compress_html", fail)
+    page = collect_urls.assemble_page(
+        "https://shop.example/product/mug",
+        HTML,
+        _plan_raw(),
+        _facts_raw(
+            [
+                {"name": "title", "value": "Чайник", "evidence": "Чайник"},
+                {"name": "price", "value": 990, "evidence": "990 ₽"},
+            ]
+        ),
+        html_is_compressed=True,
+    )
+    assert page["status"] == "ok"
+
+
 def test_build_report_shape_and_stats() -> None:
     ok = collect_urls.assemble_page(
         "https://shop.example/product/mug",

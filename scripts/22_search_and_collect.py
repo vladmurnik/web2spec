@@ -261,6 +261,26 @@ def search_searxng(
     return results, None
 
 
+def _clean_domains(domains: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for item in domains or []:
+        for chunk in str(item).split(","):
+            text = chunk.strip().casefold()
+            if not text:
+                continue
+            if "://" in text:
+                text = urllib.parse.urlsplit(text).netloc
+            text = text.split("/", 1)[0].lstrip(".")
+            if text and text not in cleaned:
+                cleaned.append(text)
+    return cleaned
+
+
+def _host_matches(url: str, domains: list[str]) -> bool:
+    host = urllib.parse.urlsplit(url).netloc.casefold().split(":", 1)[0]
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def rank_candidates(
     task: str,
     per_query: list[tuple[str, list[dict[str, Any]]]],
@@ -318,10 +338,12 @@ def search_urls(
     llm_timeout: float = 60.0,
     timeout: float = 20.0,
     search_only: bool = False,
+    domains: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[str], list[str]]:
     """Run query generation + search; return (search_block, urls, warnings)."""
 
     warnings: list[str] = []
+    domain_filter = _clean_domains(domains)
     query_source = "deterministic"
     queries: list[str] = []
     if llm_model:
@@ -338,6 +360,12 @@ def search_urls(
             warnings.append(f"local LLM unavailable, using deterministic queries: {error}")
     if not queries:
         queries = deterministic_queries(task)
+    if domain_filter:
+        # Site-scoped queries are much more reliable than filtering generic
+        # search results after the fact.  Keep the original queries too, then
+        # deduplicate and cap the total number of provider requests.
+        scoped = [f"{task} site:{domain}" for domain in domain_filter[:3]]
+        queries = list(dict.fromkeys(scoped + queries))[:8]
 
     search_fn = search_searxng if provider == "searxng" else search_ddg
     per_query: list[tuple[str, list[dict[str, Any]]]] = []
@@ -353,7 +381,18 @@ def search_urls(
             results = []
         per_query.append((query, results))
 
-    candidates = rank_candidates(task, per_query, limit=max_results)
+    candidates = rank_candidates(
+        task, per_query, limit=max_results * 3 if domain_filter else max_results
+    )
+    if domain_filter:
+        filtered = [
+            row for row in candidates if _host_matches(row["url"], domain_filter)
+        ]
+        if not filtered:
+            warnings.append(
+                "no search results matched domains: " + ", ".join(domain_filter)
+            )
+        candidates = filtered[:max_results]
     urls = [row["url"] for row in candidates]
     block = {
         "provider": provider,
@@ -362,6 +401,7 @@ def search_urls(
         "candidates": candidates,
         "count": len(candidates),
         "search_only": search_only,
+        "domains": domain_filter,
         "warnings": warnings,
     }
     return block, urls, warnings
@@ -393,6 +433,7 @@ def _collector_argv(args: argparse.Namespace, urls: list[str], out: Path) -> lis
         str(args.plan_max_new_tokens),
         "--fact-max-new-tokens",
         str(args.fact_max_new_tokens),
+        "--allow-partial" if getattr(args, "allow_partial", True) else "--no-allow-partial",
     ]
     device = getattr(args, "device", None)
     if device:
@@ -495,6 +536,19 @@ def main(argv: list[str] | None = None) -> int:
         help="локальный SearXNG (JSON API должен быть включён)",
     )
     parser.add_argument("--language", type=str, default="ru")
+    parser.add_argument(
+        "--domain",
+        action="append",
+        default=[],
+        help="ограничить поиск доменом (можно повторять), например sber.ru",
+    )
+    parser.add_argument(
+        "--domains",
+        action="append",
+        default=[],
+        metavar="LIST",
+        help="то же, но списком через запятую: sber.ru,cloud.vk.com",
+    )
     parser.add_argument("--max-results", type=int, default=10)
     parser.add_argument("--max-pages", type=int, default=8)
     parser.add_argument(
@@ -533,6 +587,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request-timeout", type=float, default=300.0)
     parser.add_argument("--max-chars", type=int, default=12_000)
     parser.add_argument("--delay", type=float, default=1.0)
+    parser.add_argument(
+        "--allow-partial",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="поля плана без факта уходят в missing, а не роняют страницу",
+    )
     parser.add_argument("--html-dir", type=Path, default=None)
     parser.add_argument("--plan-max-new-tokens", type=int, default=320)
     parser.add_argument("--fact-max-new-tokens", type=int, default=384)
@@ -559,6 +619,13 @@ def main(argv: list[str] | None = None) -> int:
         llm_timeout=args.llm_timeout,
         timeout=args.timeout,
         search_only=args.search_only,
+        domains=args.domain
+        + [
+            part.strip()
+            for group in args.domains
+            for part in group.split(",")
+            if part.strip()
+        ],
     )
     for warning in warnings:
         print(f"[warning] {warning}", file=sys.stderr)

@@ -33,16 +33,18 @@ search_cli = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(search_cli)
 
 SERVER_NAME = "web2spec"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.3.0"
 DEFAULT_PROTOCOL = "2024-11-05"
 
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "collect",
         "description": (
-            "Найти в интернете страницы по задаче и вернуть только извлечённые "
-            "структурированные факты (JSON, без HTML). Если передать urls — поиск "
-            "пропускается и обрабатываются только эти ссылки."
+            "ОДИН вызов для всей задачи: локально найти страницы, скачать их, "
+            "извлечь факты и вернуть уже сведённый JSON без HTML. Если у тебя "
+            "уже есть официальные URL — передай urls, поиск будет пропущен. "
+            "Если знаешь официальные домены — передай domains. Не вызывай "
+            "поиск отдельно: этот инструмент делает всё сам."
         ),
         "inputSchema": {
             "type": "object",
@@ -59,41 +61,36 @@ TOOLS: list[dict[str, Any]] = [
                         "локальный поиск не выполняется."
                     ),
                 },
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Необязательные домены для поиска, например "
+                        "['sber.ru', 'vk.com']; результаты вне их отбрасываются."
+                    ),
+                },
                 "max_results": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 50,
-                    "description": "Сколько ссылок взять из поиска (по умолчанию 10).",
+                    "description": "Сколько ссылок взять из поиска (по умолчанию 6).",
                 },
                 "max_pages": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 50,
-                    "description": "Сколько страниц обработать (по умолчанию 8).",
+                    "description": "Сколько страниц обработать (по умолчанию 6).",
                 },
                 "include_evidence": {
                     "type": "boolean",
-                    "description": "Добавить к фактам точные цитаты evidence (по умолчанию false).",
+                    "description": "Добавить точные цитаты evidence (по умолчанию false).",
                 },
-            },
-            "required": ["task"],
-        },
-    },
-    {
-        "name": "search_links",
-        "description": (
-            "Только найти ссылки по задаче, без скачивания и извлечения. "
-            "Полезно, если большая модель хочет сама выбрать URL."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "task": {"type": "string"},
-                "max_results": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 50,
-                    "description": "Сколько ссылок вернуть (по умолчанию 10).",
+                "include_pages": {
+                    "type": "boolean",
+                    "description": (
+                        "Вернуть разбивку по страницам (по умолчанию false: "
+                        "только сведённые факты, конфликты и ошибки)."
+                    ),
                 },
             },
             "required": ["task"],
@@ -168,35 +165,126 @@ def _namespace(
         context=context,
         startup_timeout=startup_timeout,
         request_timeout=request_timeout,
+        allow_partial=True,
         plan_max_new_tokens=320,
         fact_max_new_tokens=384,
         collector_timeout=3600.0,
     )
 
 
-def _compact(report: dict[str, Any], include_evidence: bool) -> dict[str, Any]:
+def _value_key(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _compact(
+    report: dict[str, Any],
+    include_evidence: bool,
+    include_pages: bool = False,
+) -> dict[str, Any]:
+    """Merge per-page facts so the caller does not have to read every page.
+
+    A field with one distinct value becomes ``facts[name]``.  Disagreements are
+    never silently resolved: they become ``conflicts[name]`` with every value
+    and source.  Failed pages are kept as short errors, not full page dumps.
+    """
+
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    missing: dict[str, list[str]] = {}
+    sources: list[str] = []
+    errors: list[dict[str, Any]] = []
     pages: list[dict[str, Any]] = []
+    by_source: dict[str, dict[str, Any]] = {}
+
     for page in report.get("pages", []):
-        if include_evidence:
-            facts: Any = page.get("facts", [])
+        url = page.get("url")
+        status = page.get("status")
+        facts = page.get("facts", [])
+        if status != "ok":
+            errors.append({"url": url, "status": status, "error": page.get("error")})
         else:
-            facts = {fact["name"]: fact["value"] for fact in page.get("facts", [])}
-        pages.append(
-            {
-                "url": page.get("url"),
-                "status": page.get("status"),
-                "entity": page.get("entity"),
-                "facts": facts,
-                "missing": page.get("missing", []),
-                "error": page.get("error"),
-            }
-        )
-    return {
+            if url and url not in sources:
+                sources.append(url)
+        for name in page.get("missing", []):
+            missing.setdefault(name, [])
+            if url and url not in missing[name]:
+                missing[name].append(url)
+        for fact in facts:
+            name = fact.get("name")
+            if not name:
+                continue
+            key = _value_key(fact.get("value"))
+            bucket = grouped.setdefault(name, {})
+            entry = bucket.setdefault(
+                key,
+                {
+                    "value": fact.get("value"),
+                    "sources": [],
+                    "evidence": [],
+                },
+            )
+            if url and url not in entry["sources"]:
+                entry["sources"].append(url)
+            quote = fact.get("evidence")
+            if isinstance(quote, str) and quote:
+                evidence_row = {"url": url, "quote": quote}
+                if evidence_row not in entry["evidence"]:
+                    entry["evidence"].append(evidence_row)
+        if status == "ok" and facts and url:
+            by_source[url] = {fact["name"]: fact["value"] for fact in facts}
+        if include_pages:
+            pages.append(
+                {
+                    "url": url,
+                    "status": status,
+                    "entity": page.get("entity"),
+                    "facts": {fact["name"]: fact["value"] for fact in facts},
+                    "missing": page.get("missing", []),
+                    "error": page.get("error"),
+                }
+            )
+
+    facts: dict[str, Any] = {}
+    conflicts: dict[str, list[dict[str, Any]]] = {}
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    for name, values in grouped.items():
+        rows = list(values.values())
+        if len(rows) == 1:
+            facts[name] = rows[0]["value"]
+            if include_evidence:
+                evidence[name] = rows[0]["evidence"]
+        else:
+            conflicts[name] = [
+                {
+                    "value": row["value"],
+                    "sources": row["sources"],
+                    **( {"evidence": row["evidence"]} if include_evidence else {} ),
+                }
+                for row in rows
+            ]
+
+    result: dict[str, Any] = {
         "task": report.get("task"),
-        "pages": pages,
+        "facts": facts,
+        "conflicts": conflicts,
+        "missing": {
+            name: urls
+            for name, urls in missing.items()
+            if name not in facts and name not in conflicts
+        },
+        "sources": sources,
+        "errors": errors,
         "stats": report.get("stats", {}),
         "search": report.get("search", {}),
     }
+    if include_evidence:
+        result["evidence"] = evidence
+    if conflicts and len(by_source) > 1:
+        # Multi-entity tasks (compare A/B/C): keep compact per-source rows so
+        # the caller can attribute each conflicting value without reading pages.
+        result["by_source"] = by_source
+    if include_pages:
+        result["pages"] = pages
+    return result
 
 
 def tool_search_links(args: dict[str, Any]) -> dict[str, Any]:
@@ -205,6 +293,7 @@ def tool_search_links(args: dict[str, Any]) -> dict[str, Any]:
     if len(task) < 5:
         raise ValueError("task must contain at least 5 characters")
     max_results = int(args.get("max_results") or 10)
+    domains = args.get("domains") or []
     block, urls, warnings = search_cli.search_urls(
         task,
         provider=cfg["provider"],
@@ -215,6 +304,7 @@ def tool_search_links(args: dict[str, Any]) -> dict[str, Any]:
         llm_url=cfg["llm_url"],
         llm_provider=cfg["llm_provider"],
         search_only=True,
+        domains=domains,
     )
     return {
         "task": task,
@@ -238,12 +328,16 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
     task = str(args.get("task") or "").strip()
     if len(task) < 5:
         raise ValueError("task must contain at least 5 characters")
-    max_results = int(args.get("max_results") or 10)
-    max_pages = int(args.get("max_pages") or 8)
+    max_results = int(args.get("max_results") or 6)
+    max_pages = int(args.get("max_pages") or 6)
     include_evidence = bool(args.get("include_evidence", False))
+    include_pages = bool(args.get("include_pages", False))
     raw_urls = args.get("urls") or []
+    domains = args.get("domains") or []
     if not isinstance(raw_urls, list):
         raise ValueError("urls must be an array of strings")
+    if not isinstance(domains, list):
+        raise ValueError("domains must be an array of strings")
     urls = [str(url).strip() for url in raw_urls if str(url).strip()]
 
     search_block: dict[str, Any] = {}
@@ -259,13 +353,26 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
             llm_url=cfg["llm_url"],
             llm_provider=cfg["llm_provider"],
             search_only=False,
+            domains=[str(domain) for domain in domains],
         )
     if not urls:
         return {
             "task": task,
-            "pages": [],
+            "facts": {},
+            "conflicts": {},
+            "missing": {},
+            "sources": [],
+            "errors": [],
             "stats": {"requested": 0, "ok": 0, "failed": 0, "by_status": {}},
-            "search": {**search_block, "warnings": warnings, "collector_error": "no URLs found"},
+            "search": {
+                "provider": search_block.get("provider"),
+                "query_source": search_block.get("query_source"),
+                "queries": search_block.get("queries", []),
+                "count": 0,
+                "domains": search_block.get("domains", []),
+                "warnings": warnings,
+                "collector_error": "no URLs found",
+            },
         }
 
     ns = _namespace(
@@ -290,8 +397,15 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(error)
     report = report or {}
     report["task"] = task
-    report["search"] = {**search_block, "warnings": warnings}
-    return _compact(report, include_evidence)
+    report["search"] = {
+        "provider": search_block.get("provider"),
+        "query_source": search_block.get("query_source"),
+        "queries": search_block.get("queries", []),
+        "count": search_block.get("count", len(urls)),
+        "domains": search_block.get("domains", []),
+        "warnings": warnings,
+    }
+    return _compact(report, include_evidence, include_pages=include_pages)
 
 
 def _text_result(payload: Any, *, is_error: bool = False) -> dict[str, Any]:
@@ -324,9 +438,11 @@ def handle_message(request: dict[str, Any]) -> dict[str, Any] | None:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Вызывай collect(task=...) чтобы локально найти страницы и получить "
-                    "только факты. HTML наружу не отдаётся. Если у тебя уже есть URL, "
-                    "передай их в urls."
+                    "Для всей задачи вызывай ОДИН раз collect(task=...). Он сам ищет "
+                    "страницы, скачивает их и возвращает сведённые факты без HTML. "
+                    "Если знаешь официальные URL или домены — передай urls/domains. "
+                    "Поля с разными значениями придут в conflicts, а не будут "
+                    "угаданы; отсутствующие — в missing."
                 ),
             },
         }

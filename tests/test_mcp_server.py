@@ -36,10 +36,12 @@ def _report() -> dict:
 def test_tools_list_contract() -> None:
     response = mcp.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     names = [tool["name"] for tool in response["result"]["tools"]]
-    assert names == ["collect", "search_links"]
+    assert names == ["collect"]
     collect = response["result"]["tools"][0]
     assert collect["inputSchema"]["required"] == ["task"]
     assert "urls" in collect["inputSchema"]["properties"]
+    assert "domains" in collect["inputSchema"]["properties"]
+    assert "include_pages" in collect["inputSchema"]["properties"]
 
 
 def test_initialize_reports_tools_capability() -> None:
@@ -129,8 +131,9 @@ def test_collect_with_urls_returns_compact_facts(monkeypatch) -> None:
     )
     assert response["result"]["isError"] is False
     payload = json.loads(response["result"]["content"][0]["text"])
-    assert payload["pages"][0]["facts"] == {"title": "Заголовок", "author": "Иван"}
-    assert payload["pages"][0]["missing"] == ["published_at"]
+    assert payload["facts"] == {"title": "Заголовок", "author": "Иван"}
+    assert payload["missing"] == {"published_at": ["https://example.com/a"]}
+    assert payload["sources"] == ["https://example.com/a"]
     assert "evidence" not in response["result"]["content"][0]["text"]
 
 
@@ -154,14 +157,82 @@ def test_collect_include_evidence(monkeypatch) -> None:
         }
     )
     payload = json.loads(response["result"]["content"][0]["text"])
-    assert payload["pages"][0]["facts"][0]["evidence"] == "Заголовок"
+    assert payload["evidence"]["title"][0]["quote"] == "Заголовок"
+    assert "pages" not in payload
+
+
+def test_collect_include_pages_returns_per_page_rows(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp.search_cli, "_run_collector", lambda ns, urls: (_report(), None)
+    )
+    response = mcp.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "collect",
+                "arguments": {
+                    "task": "найди статьи",
+                    "urls": ["https://example.com/a"],
+                    "include_pages": True,
+                },
+            },
+        }
+    )
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["pages"][0]["facts"] == {"title": "Заголовок", "author": "Иван"}
+
+
+def test_collect_reports_conflicts_instead_of_choosing(monkeypatch) -> None:
+    report = _report()
+    report["pages"].append(
+        {
+            "url": "https://example.com/b",
+            "status": "ok",
+            "entity": "article",
+            "facts": [
+                {"name": "title", "value": "Другой", "evidence": "Другой"},
+                {"name": "author", "value": "Иван", "evidence": "Иван"},
+            ],
+            "missing": [],
+            "error": None,
+        }
+    )
+    monkeypatch.setattr(
+        mcp.search_cli, "_run_collector", lambda ns, urls: (report, None)
+    )
+    response = mcp.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "collect",
+                "arguments": {
+                    "task": "найди статьи",
+                    "urls": ["https://example.com/a", "https://example.com/b"],
+                },
+            },
+        }
+    )
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["facts"] == {"author": "Иван"}
+    assert "title" not in payload["facts"]
+    assert {row["value"] for row in payload["conflicts"]["title"]} == {
+        "Заголовок",
+        "Другой",
+    }
+    assert payload["conflicts"]["title"][0]["sources"]
+    assert payload["by_source"]["https://example.com/b"]["title"] == "Другой"
 
 
 def test_collect_without_urls_runs_search(monkeypatch) -> None:
-    called = {"search": 0}
+    called = {"search": 0, "domains": None}
 
     def fake_search(task, **kwargs):
         called["search"] += 1
+        called["domains"] = kwargs.get("domains")
         return (
             {
                 "queries": ["q"],
@@ -185,11 +256,15 @@ def test_collect_without_urls_runs_search(monkeypatch) -> None:
             "jsonrpc": "2.0",
             "id": 6,
             "method": "tools/call",
-            "params": {"name": "collect", "arguments": {"task": "найди статьи"}},
+            "params": {
+                "name": "collect",
+                "arguments": {"task": "найди статьи", "domains": ["example.com"]},
+            },
         }
     )
     payload = json.loads(response["result"]["content"][0]["text"])
     assert called["search"] == 1
+    assert called["domains"] == ["example.com"]
     assert seen["urls"] == ["https://a.example/1"]
     assert payload["search"]["queries"] == ["q"]
 

@@ -27,11 +27,12 @@ from web2spec.llama_runtime import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = REPO_ROOT / "scripts"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 COMMANDS = {
     "collect": "21_collect_urls.py",
     "search": "22_search_and_collect.py",
+    "research": "22_search_and_collect.py",
     "mcp": "23_mcp_server.py",
     "eval-q4": "24_eval_q4km.py",
     "eval-runtime": "20_eval_runtime.py",
@@ -88,6 +89,7 @@ def _help() -> str:
         "Commands:",
         "  collect           task + URLs -> structured facts",
         "  search            task -> local search -> facts",
+        "  research          alias for search (one-call research)",
         "  mcp               MCP stdio server for any MCP client",
         "  doctor            check models, llama-server and paths",
         "  eval-q4           Q4_K_M quality/speed evaluation",
