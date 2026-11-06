@@ -41,7 +41,7 @@ from web2spec.llama_runtime import (  # noqa: E402, F401
 )
 
 COLLECTOR = REPO_ROOT / "scripts" / "21_collect_urls.py"
-USER_AGENT = "web2spec-search/0.1 (local research; contact: local)"
+USER_AGENT = "web2spec-search/0.4 (local research; contact: local)"
 MAX_QUERIES = 6
 
 _QUERY_PROMPT = """Ты поисковый ассистент. По задаче пользователя составь от 3 до 5

@@ -32,8 +32,10 @@ assert _spec is not None and _spec.loader is not None
 search_cli = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(search_cli)
 
+from web2spec import __version__  # noqa: E402
+
 SERVER_NAME = "web2spec"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = __version__
 DEFAULT_PROTOCOL = "2024-11-05"
 
 TOOLS: list[dict[str, Any]] = [
