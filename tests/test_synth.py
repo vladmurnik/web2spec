@@ -108,7 +108,11 @@ def test_stats_shape() -> None:
 def test_cli_dry_run(tmp_path: Path) -> None:
     source = tmp_path / "input.jsonl"
     source.write_text(json.dumps(make_input(), ensure_ascii=False) + "\n", encoding="utf-8")
-    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(REPO_ROOT / "src"),
+        "PYTHONIOENCODING": "utf-8",
+    }
     result = subprocess.run(
         [
             sys.executable,
@@ -121,6 +125,8 @@ def test_cli_dry_run(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     assert result.returncode == 0, result.stderr
