@@ -138,6 +138,10 @@ web2spec download-models --only all
 web2spec doctor
 ```
 
+Install with `-e` (editable). The CLI resolves `scripts/` and `models/` relative
+to the repository checkout, so this is a repository-first project rather than a
+library-only wheel.
+
 `download-models` verifies SHA-256 hashes from
 [`models/checksums.sha256`](models/checksums.sha256). The two 0.5B collector
 models are attached to the GitHub release; the 4B analyst comes from the

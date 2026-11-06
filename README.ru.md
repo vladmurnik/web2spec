@@ -140,6 +140,10 @@ web2spec download-models --only all
 web2spec doctor
 ```
 
+Ставьте именно `-e` (editable): CLI ищет `scripts/` и `models/` относительно
+checkout, поэтому проект рассчитан на клонирование репозитория, а не на
+библиотечный wheel.
+
 `download-models` проверяет SHA-256 по
 [`models/checksums.sha256`](models/checksums.sha256). Две 0.5B-модели
 прикреплены к GitHub release; 4B-аналитик скачивается из официального
