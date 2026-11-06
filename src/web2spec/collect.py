@@ -151,9 +151,12 @@ def _decode(body: bytes, content_type: str) -> str:
         meta = re.search(r"<meta[^>]+charset=[\"']?([\w-]+)", head, re.I)
         charset = meta.group(1) if meta else "utf-8"
     try:
-        return body.decode(charset, errors="replace")
+        text = body.decode(charset, errors="replace")
     except LookupError:
-        return body.decode("utf-8", errors="replace")
+        text = body.decode("utf-8", errors="replace")
+    # A page served as UTF-8 often starts with a BOM; the schema forbids it in
+    # ``input_html`` and it leaks into compressed metadata headers.
+    return text.lstrip("\ufeff")
 
 
 def fetch(

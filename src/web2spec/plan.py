@@ -242,7 +242,23 @@ def load_factset_lenient(
     ``validate_factset`` still checks plan coverage and exact evidence later.
     """
 
+    if isinstance(raw, list):
+        raw = {"facts": raw, "missing": []}
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise PlanError(f"fact set is not JSON: {exc}") from exc
+        if isinstance(parsed, list):
+            parsed = {"facts": parsed, "missing": []}
+        raw = parsed
     raw = _factset_payload(raw)
+    if isinstance(raw, list):
+        raw = {"facts": raw, "missing": []}
+    if isinstance(raw, dict) and "facts" not in raw and "name" in raw:
+        # The extractor occasionally returns a bare fact object instead of a
+        # FactSet; treat it as a single-fact set.
+        raw = {"facts": [raw], "missing": []}
     facts_raw = raw.get("facts", [])
     missing_raw = raw.get("missing", [])
     if not isinstance(facts_raw, list):
@@ -252,6 +268,7 @@ def load_factset_lenient(
 
     facts: list[dict[str, Any]] = []
     seen: set[str] = set()
+    missing: list[str] = []
     for item in facts_raw:
         if not isinstance(item, dict):
             if dropped is not None:
@@ -281,10 +298,27 @@ def load_factset_lenient(
                 )
             continue
         seen.add(name)
-        facts.append(item)
+        evidence = item.get("evidence")
+        if not isinstance(evidence, str) or not evidence.strip():
+            # The extractor sometimes omits evidence.  Without a verbatim span
+            # the value cannot be verified, so the field becomes ``missing``.
+            if dropped is not None:
+                dropped.append(
+                    {
+                        "name": name,
+                        "value": item.get("value"),
+                        "evidence": evidence,
+                        "reason": "missing_evidence",
+                    }
+                )
+            if name not in missing:
+                missing.append(name)
+            continue
+        facts.append({k: item[k] for k in ("name", "value", "evidence") if k in item})
 
-    missing: list[str] = []
     for name in missing_raw:
+        if isinstance(name, dict):
+            name = name.get("name")
         if (
             isinstance(name, str)
             and _NAME_RE.match(name)

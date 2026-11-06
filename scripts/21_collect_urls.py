@@ -68,7 +68,7 @@ def load_url_list(path: Path) -> list[str]:
 
     urls: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+        line = line.strip().lstrip("\ufeff")
         if not line or line.startswith("#"):
             continue
         urls.append(line.split()[0])
@@ -143,6 +143,7 @@ def assemble_page(
     plan_stage_error: str | None = None,
     extract_stage_error: str | None = None,
     max_chars: int = 12_000,
+    allow_partial: bool = False,
 ) -> dict[str, Any]:
     """Deterministic part of the cascade: plan + fact JSON -> one page result.
 
@@ -210,6 +211,12 @@ def assemble_page(
             page["dropped_foreign"].append(_fact_row(fact))
     kept_missing = [name for name in factset.missing if name in plan_names]
     factset = FactSet(facts=kept_facts, missing=kept_missing)
+
+    if allow_partial:
+        covered = {fact.name for fact in factset.facts} | set(factset.missing)
+        extra = sorted(plan_names - covered)
+        if extra:
+            factset = FactSet(facts=factset.facts, missing=list(factset.missing) + extra)
 
     try:
         validate_factset(factset, plan, compressed)
@@ -581,6 +588,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--plan-max-new-tokens", type=int, default=320)
     parser.add_argument("--fact-max-new-tokens", type=int, default=384)
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="не падать, когда часть полей плана не найдена: они уходят в missing",
+    )
     args = parser.parse_args(argv)
 
     task = " ".join(args.task.split())
@@ -682,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
             plan_stage_error=plan_batch_error,
             extract_stage_error=fact_batch_error,
             max_chars=args.max_chars,
+            allow_partial=args.allow_partial,
         )
 
     pages = [pages_by_url[url] for url in urls]

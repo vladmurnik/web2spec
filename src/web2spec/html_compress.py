@@ -146,6 +146,9 @@ def compress_html(html: str, *, max_chars: int = 12_000) -> str:
     text = str(body)
     text = _WS_RE.sub(" ", text)
     text = _TAG_WS_RE.sub("><", text).strip()
+    # BOM characters occur inside page text (not just at the start); the sample
+    # schema rejects them and they carry no meaning in a compressed skeleton.
+    text = text.replace("\ufeff", "")
     header = _metadata_header(metadata)
     if header:
         text = header + text
