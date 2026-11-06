@@ -1,17 +1,15 @@
-"""MCP server: one tool call -> local search -> pages -> small-model facts.
+"""MCP server: one call -> local research or collection -> evidence JSON.
 
 Any MCP-capable client (Claude Desktop, Cursor, Cline, custom agent) can call
-``collect`` with a natural-language task.  The server:
 
-1. asks a local LLM (optional, Ollama/OpenAI-compatible) for search queries;
-2. searches with SearXNG or DuckDuckGo HTML, without paid APIs;
-3. downloads and compresses the best pages;
-4. runs the local 0.5B planner + extractor;
-5. returns compact JSON facts, never HTML.
+* ``research`` for a vague/complex task: a 4B local analyst builds a brief,
+  searches, reads 20-50 pages and returns evidence-backed findings;
+* ``collect`` for a fast URL-first path: search/fetch/extract with the 0.5B
+  planner and extractor.
 
-The big model therefore writes only what it needs and receives only the data.
-Transport is MCP stdio: newline-delimited JSON-RPC 2.0 on stdin/stdout.
-All diagnostics go to stderr so stdout stays protocol-clean.
+Both return compact JSON, never HTML.  Transport is MCP stdio:
+newline-delimited JSON-RPC 2.0 on stdin/stdout.  All diagnostics go to stderr
+so stdout stays protocol-clean.
 """
 
 from __future__ import annotations
@@ -20,12 +18,14 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SEARCH_SCRIPT = REPO_ROOT / "scripts" / "22_search_and_collect.py"
+RESEARCH_SCRIPT = REPO_ROOT / "scripts" / "26_research.py"
 
 _spec = importlib.util.spec_from_file_location("web2spec_search", SEARCH_SCRIPT)
 assert _spec is not None and _spec.loader is not None
@@ -33,18 +33,74 @@ search_cli = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(search_cli)
 
 SERVER_NAME = "web2spec"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.4.0"
 DEFAULT_PROTOCOL = "2024-11-05"
 
 TOOLS: list[dict[str, Any]] = [
     {
+        "name": "research",
+        "description": (
+            "ОДИН вызов для сложной или расплывчатой задачи: локальный 4B-аналитик "
+            "сам уточняет вопросы, ищет, читает 20-50 страниц и возвращает отчёт "
+            "с точными цитатами, конфликтами и пробелами. Используй это, когда "
+            "заранее неизвестны точные страницы. Если есть официальные URL — "
+            "лучше быстрый collect."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Что исследовать, на естественном языке.",
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Необязательные стартовые URL.",
+                },
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Ограничить поиск доменами, например ['sber.ru'].",
+                },
+                "source_hints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Подсказки об официальных доменах/типах страниц.",
+                },
+                "min_pages": {
+                    "type": "integer",
+                    "minimum": 20,
+                    "maximum": 50,
+                    "description": "Минимум страниц (по умолчанию 20).",
+                },
+                "max_pages": {
+                    "type": "integer",
+                    "minimum": 20,
+                    "maximum": 50,
+                    "description": "Максимум страниц (по умолчанию 30).",
+                },
+                "max_rounds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "description": "Сколько раундов поиска (по умолчанию 2).",
+                },
+                "include_notes": {
+                    "type": "boolean",
+                    "description": "Вернуть все заметки с цитатами (по умолчанию false).",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "collect",
         "description": (
-            "ОДИН вызов для всей задачи: локально найти страницы, скачать их, "
-            "извлечь факты и вернуть уже сведённый JSON без HTML. Если у тебя "
-            "уже есть официальные URL — передай urls, поиск будет пропущен. "
-            "Если знаешь официальные домены — передай domains. Не вызывай "
-            "поиск отдельно: этот инструмент делает всё сам."
+            "Быстрый ОДИН вызов: локально найти страницы или взять готовые URL, "
+            "скачать их, извлечь факты и вернуть сведённый JSON без HTML. "
+            "Используй, когда уже знаешь официальные URL/домены. Для сложного "
+            "поиска по расплывчатой задаче используй research."
         ),
         "inputSchema": {
             "type": "object",
@@ -118,6 +174,9 @@ def _defaults() -> dict[str, Any]:
             "WEB2SPEC_EXTRACTOR",
             str(search_cli.DEFAULT_EXTRACTOR),
         ),
+        "analyst": _env("WEB2SPEC_ANALYST", str(search_cli.DEFAULT_ANALYST)),
+        "research_min_pages": int(_env("WEB2SPEC_RESEARCH_MIN_PAGES", "20")),
+        "research_max_pages": int(_env("WEB2SPEC_RESEARCH_MAX_PAGES", "30")),
         "backend": _env("WEB2SPEC_BACKEND", "auto"),
         "llama_server": os.environ.get("WEB2SPEC_LLAMA_SERVER") or None,
         "device": _env("WEB2SPEC_LLAMA_DEVICE", search_cli.DEFAULT_DEVICE),
@@ -323,6 +382,112 @@ def tool_search_links(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def tool_research(args: dict[str, Any]) -> dict[str, Any]:
+    cfg = _defaults()
+    task = str(args.get("task") or "").strip()
+    if len(task) < 5:
+        raise ValueError("task must contain at least 5 characters")
+    min_pages = max(20, min(50, int(args.get("min_pages") or cfg["research_min_pages"])))
+    max_pages = max(
+        min_pages, min(50, int(args.get("max_pages") or cfg["research_max_pages"]))
+    )
+    max_rounds = max(1, min(4, int(args.get("max_rounds") or 2)))
+    include_notes = bool(args.get("include_notes", False))
+    raw_urls = args.get("urls") or []
+    raw_domains = args.get("domains") or []
+    raw_hints = args.get("source_hints") or []
+    for label, value in (
+        ("urls", raw_urls),
+        ("domains", raw_domains),
+        ("source_hints", raw_hints),
+    ):
+        if not isinstance(value, list):
+            raise ValueError(f"{label} must be an array of strings")
+
+    out = REPO_ROOT / "data" / "reports" / f"mcp_research_{os.getpid()}.json"
+    command = [
+        sys.executable,
+        str(RESEARCH_SCRIPT),
+        "--task",
+        task,
+        "--min-pages",
+        str(min_pages),
+        "--max-pages",
+        str(max_pages),
+        "--max-rounds",
+        str(max_rounds),
+        "--provider",
+        str(cfg["provider"]),
+        "--searxng-url",
+        str(cfg["searxng_url"]),
+        "--language",
+        str(cfg["language"]),
+        "--analyst",
+        str(cfg["analyst"]),
+        "--device",
+        str(cfg["device"]),
+        "--context",
+        str(cfg["context"]),
+        "--startup-timeout",
+        str(cfg["startup_timeout"]),
+        "--request-timeout",
+        str(cfg["request_timeout"]),
+        "--fetch-timeout",
+        str(cfg["timeout"]),
+        "--delay",
+        str(cfg["delay"]),
+        "--out",
+        str(out),
+    ]
+    if cfg["llama_server"]:
+        command += ["--llama-server", str(cfg["llama_server"])]
+    if cfg["html_dir"]:
+        command += ["--html-dir", str(cfg["html_dir"])]
+    for url in raw_urls:
+        if str(url).strip():
+            command += ["--url", str(url).strip()]
+    for domain in raw_domains:
+        if str(domain).strip():
+            command += ["--domain", str(domain).strip()]
+    for hint in raw_hints:
+        if str(hint).strip():
+            command += ["--source-hint", str(hint).strip()]
+
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=float(_env("WEB2SPEC_RESEARCH_TIMEOUT", "3600")),
+        )
+        if process.returncode != 0:
+            tail = "\n".join(process.stderr.strip().splitlines()[-6:])
+            raise RuntimeError(f"research failed ({process.returncode}): {tail}")
+        if not out.is_file():
+            raise RuntimeError("research produced no report")
+        report = json.loads(out.read_text(encoding="utf-8"))
+    finally:
+        out.unlink(missing_ok=True)
+
+    result: dict[str, Any] = {
+        "goal": report.get("goal"),
+        "answer": report.get("answer", ""),
+        "brief": report.get("brief", {}),
+        "entities": report.get("entities", []),
+        "sources": report.get("sources", []),
+        "errors": report.get("errors", [])[:20],
+        "gaps": report.get("gaps", []),
+        "stats": report.get("stats", {}),
+        "speed": report.get("speed", {}),
+        "config": report.get("config", {}),
+    }
+    if include_notes:
+        result["notes"] = report.get("notes", [])
+    return result
+
+
 def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
     cfg = _defaults()
     task = str(args.get("task") or "").strip()
@@ -438,11 +603,12 @@ def handle_message(request: dict[str, Any]) -> dict[str, Any] | None:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Для всей задачи вызывай ОДИН раз collect(task=...). Он сам ищет "
-                    "страницы, скачивает их и возвращает сведённые факты без HTML. "
-                    "Если знаешь официальные URL или домены — передай urls/domains. "
-                    "Поля с разными значениями придут в conflicts, а не будут "
-                    "угаданы; отсутствующие — в missing."
+                    "Для сложной или расплывчатой задачи вызывай ОДИН раз "
+                    "research(task=...): локальный 4B-аналитик сам ищет и читает "
+                    "20-50 страниц, возвращает отчёт с цитатами, конфликтами и "
+                    "пробелами. Если уже есть официальные URL/домены, вызывай "
+                    "быстрый collect(task=..., urls/domains=...). Не вызывай "
+                    "поиск отдельными инструментами."
                 ),
             },
         }
@@ -456,6 +622,8 @@ def handle_message(request: dict[str, Any]) -> dict[str, Any] | None:
         try:
             if name == "collect":
                 result = tool_collect(arguments)
+            elif name == "research":
+                result = tool_research(arguments)
             elif name == "search_links":
                 result = tool_search_links(arguments)
             else:
@@ -520,7 +688,7 @@ def serve(stdin: Any = None, stdout: Any = None) -> int:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     print(
-        f"[mcp] {SERVER_NAME} {SERVER_VERSION} ready (tools: collect, search_links)",
+        f"[mcp] {SERVER_NAME} {SERVER_VERSION} ready (tools: research, collect)",
         file=sys.stderr,
         flush=True,
     )
@@ -536,7 +704,7 @@ def serve(stdin: Any = None, stdout: Any = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="MCP-сервер web2spec: задача → факты")
+    parser = argparse.ArgumentParser(description="MCP server web2spec: task -> evidence")
     parser.add_argument("--provider", choices=("searxng", "ddg"), default=None)
     parser.add_argument("--searxng-url", type=str, default=None)
     parser.add_argument("--llm-model", type=str, default=None)
@@ -545,6 +713,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--language", type=str, default=None)
     parser.add_argument("--planner", type=str, default=None)
     parser.add_argument("--extractor", type=str, default=None)
+    parser.add_argument("--analyst", type=str, default=None)
+    parser.add_argument("--min-pages", type=int, default=None)
+    parser.add_argument("--max-pages", type=int, default=None)
     parser.add_argument("--backend", choices=("auto", "gguf", "hf"), default=None)
     parser.add_argument("--llama-server", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
@@ -566,6 +737,13 @@ def main(argv: list[str] | None = None) -> int:
         "WEB2SPEC_LANGUAGE": args.language,
         "WEB2SPEC_PLANNER": args.planner,
         "WEB2SPEC_EXTRACTOR": args.extractor,
+        "WEB2SPEC_ANALYST": args.analyst,
+        "WEB2SPEC_RESEARCH_MIN_PAGES": (
+            str(args.min_pages) if args.min_pages else None
+        ),
+        "WEB2SPEC_RESEARCH_MAX_PAGES": (
+            str(args.max_pages) if args.max_pages else None
+        ),
         "WEB2SPEC_BACKEND": args.backend,
         "WEB2SPEC_LLAMA_SERVER": args.llama_server,
         "WEB2SPEC_LLAMA_DEVICE": args.device,

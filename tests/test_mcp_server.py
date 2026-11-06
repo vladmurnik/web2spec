@@ -35,13 +35,75 @@ def _report() -> dict:
 
 def test_tools_list_contract() -> None:
     response = mcp.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    names = [tool["name"] for tool in response["result"]["tools"]]
-    assert names == ["collect"]
-    collect = response["result"]["tools"][0]
+    tools = response["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["research", "collect"]
+    research = tools[0]
+    assert research["inputSchema"]["required"] == ["task"]
+    assert "source_hints" in research["inputSchema"]["properties"]
+    assert "min_pages" in research["inputSchema"]["properties"]
+    collect = tools[1]
     assert collect["inputSchema"]["required"] == ["task"]
     assert "urls" in collect["inputSchema"]["properties"]
     assert "domains" in collect["inputSchema"]["properties"]
     assert "include_pages" in collect["inputSchema"]["properties"]
+
+
+def test_research_tool_clamps_pages_and_returns_report(monkeypatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        out = Path(command[command.index("--out") + 1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(
+                {
+                    "goal": "тарифы",
+                    "answer": "ответ",
+                    "brief": {"questions": ["q"]},
+                    "entities": [{"entity": "yandex"}],
+                    "sources": ["https://example.com"],
+                    "errors": [],
+                    "gaps": [],
+                    "stats": {"pages_ok": 20},
+                    "speed": {"calls": 3},
+                    "config": {"max_pages": 50},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr(mcp.subprocess, "run", fake_run)
+    response = mcp.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "research",
+                "arguments": {
+                    "task": "сравни тарифы",
+                    "min_pages": 1,
+                    "max_pages": 99,
+                },
+            },
+        }
+    )
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["answer"] == "ответ"
+    command = seen["command"]
+    assert command[command.index("--min-pages") + 1] == "20"
+    assert command[command.index("--max-pages") + 1] == "50"
+    assert payload["stats"]["pages_ok"] == 20
 
 
 def test_initialize_reports_tools_capability() -> None:

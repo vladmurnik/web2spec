@@ -33,7 +33,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from web2spec.llama_runtime import (  # noqa: E402
+from web2spec.llama_runtime import (  # noqa: E402, F401
+    DEFAULT_ANALYST,
     DEFAULT_DEVICE,
     DEFAULT_EXTRACTOR,
     DEFAULT_PLANNER,

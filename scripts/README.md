@@ -7,6 +7,7 @@ Numbered-скрипты сохранены как воспроизводимый
 web2spec doctor
 web2spec collect --task "..." --urls data/urls.txt
 web2spec search --task "..." --provider ddg
+web2spec research --task "..." --min-pages 20 --max-pages 30
 web2spec mcp
 ```
 
@@ -39,8 +40,9 @@ web2spec mcp
 |---|---|
 | `21_collect_urls.py` | задача + URL → сжатие → planner → extractor → факты; lenient-план и `--allow-partial` |
 | `22_search_and_collect.py` | задача → запросы → локальный поиск → collector; `--domain` / `--domains` |
-| `23_mcp_server.py` | MCP stdio-сервер: один инструмент `collect` (поиск + факты) |
+| `23_mcp_server.py` | MCP stdio-сервер: `research` (4B, 20–50 страниц) и `collect` (быстрый URL-first) |
 | `24_eval_q4km.py` | тот же runtime-тест на Q4_K_M GGUF |
+| `26_research.py` | question-first research: 4B-аналитик, 20–50 страниц, заметки с цитатами, отчёт |
 
 ## Порядок воспроизведения
 
@@ -49,7 +51,7 @@ web2spec mcp
 3. `05_eval.py`, `17_eval_plan.py`, `19_eval_plan_extract.py`,
    `20_eval_runtime.py`, `24_eval_q4km.py`.
 4. Runtime: `21_collect_urls.py`, `22_search_and_collect.py`,
-   `23_mcp_server.py`.
+   `26_research.py`, `23_mcp_server.py`.
 
 `13` и `16` в репозитории отсутствуют: нумерация отражает исторические шаги,
 а не непрерывную последовательность.

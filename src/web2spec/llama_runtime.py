@@ -27,6 +27,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PLANNER = REPO_ROOT / "models/gguf/qwen05b-plan-Q4_K_M.gguf"
 DEFAULT_EXTRACTOR = REPO_ROOT / "models/gguf/qwen05b-plan-extract-v2-Q4_K_M.gguf"
+DEFAULT_ANALYST = REPO_ROOT / "models/gguf/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
 DEFAULT_DEVICE = os.environ.get("WEB2SPEC_LLAMA_DEVICE", "Vulkan0")
 STOP_TOKENS = ["<|im_end|>", "<|endoftext|>"]
 
@@ -115,6 +116,7 @@ class LlamaServer:
         self.process: subprocess.Popen[str] | None = None
         self._log_path: Path | None = None
         self._log_handle: Any = None
+        self.last_timings: dict[str, Any] = {}
 
     def __enter__(self) -> LlamaServer:
         if not self.model.is_file():
@@ -217,6 +219,8 @@ class LlamaServer:
         content = body.get("content")
         if not isinstance(content, str):
             raise RuntimeError(f"llama-server вернул неожиданный ответ: {body}")
+        timings = body.get("timings")
+        self.last_timings = timings if isinstance(timings, dict) else {}
         return content
 
     def close(self) -> None:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "web2spec"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local task -> web search -> structured facts pipeline for 4 GB VRAM"
 requires-python = ">=3.12"
 dependencies = [

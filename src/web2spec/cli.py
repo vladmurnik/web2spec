@@ -5,6 +5,7 @@ entry point for day-to-day use::
 
     web2spec collect --task "..." --url https://...
     web2spec search  --task "..." --provider ddg
+    web2spec research --task "..." --min-pages 20 --max-pages 30
     web2spec mcp
     web2spec doctor
 
@@ -20,6 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 from web2spec.llama_runtime import (
+    DEFAULT_ANALYST,
     DEFAULT_EXTRACTOR,
     DEFAULT_PLANNER,
     resolve_server,
@@ -27,12 +29,12 @@ from web2spec.llama_runtime import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = REPO_ROOT / "scripts"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 COMMANDS = {
     "collect": "21_collect_urls.py",
     "search": "22_search_and_collect.py",
-    "research": "22_search_and_collect.py",
+    "research": "26_research.py",
     "mcp": "23_mcp_server.py",
     "eval-q4": "24_eval_q4km.py",
     "eval-runtime": "20_eval_runtime.py",
@@ -59,6 +61,7 @@ def _load(script: str) -> ModuleType:
 def _doctor() -> int:
     checks: list[tuple[str, bool, str]] = []
     for label, path in (
+        ("analyst Q4_K_M", DEFAULT_ANALYST),
         ("planner Q4_K_M", DEFAULT_PLANNER),
         ("extractor Q4_K_M", DEFAULT_EXTRACTOR),
     ):
@@ -88,8 +91,8 @@ def _help() -> str:
         "",
         "Commands:",
         "  collect           task + URLs -> structured facts",
-        "  search            task -> local search -> facts",
-        "  research          alias for search (one-call research)",
+        "  search            task -> local search -> collector facts",
+        "  research          task -> 20-50 pages -> evidence report",
         "  mcp               MCP stdio server for any MCP client",
         "  doctor            check models, llama-server and paths",
         "  eval-q4           Q4_K_M quality/speed evaluation",
