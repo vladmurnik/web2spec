@@ -25,6 +25,11 @@ STATS_PATH = REPO_ROOT / "data" / "reports" / "synthetic_stats.json"
 GEN_PATH = REPO_ROOT / "scripts" / "09_make_synthetic.py"
 
 CATEGORIES = ("product", "article", "listing", "job", "realestate")
+_DATA_READY = all((SYN_DIR / f"{category}.jsonl").is_file() for category in CATEGORIES)
+pytestmark = pytest.mark.skipif(
+    not (_DATA_READY and STATS_PATH.is_file()),
+    reason="synthetic shards are not generated; run scripts/09_make_synthetic.py",
+)
 TOTAL_MIN = 500
 PER_CATEGORY_MIN = TOTAL_MIN // len(CATEGORIES)
 HTML_MIN = 1500
