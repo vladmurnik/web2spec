@@ -1,45 +1,94 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "web2spec"
 version = "0.4.0"
-description = "Local task -> web search -> structured facts pipeline for 4 GB VRAM"
+description = "Local evidence-first web research for API models: task -> search -> pages -> facts"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Vladislav Murnik" }]
+keywords = [
+  "llm",
+  "mcp",
+  "local-first",
+  "web-research",
+  "structured-extraction",
+  "gguf",
+  "llama.cpp",
+  "qwen",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: GPU",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
+  "pydantic>=2.8",
+  "PyYAML>=6.0",
+  "jsonschema>=4.23",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.2",
+  "requests>=2.32",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+hf = [
+  "torch>=2.4",
+  "transformers>=4.46",
+  "accelerate>=1.0",
+]
+train = [
   "torch>=2.4",
   "transformers>=4.46",
   "peft>=0.13",
   "bitsandbytes>=0.44",
   "accelerate>=1.0",
   "datasets>=3.0",
-  "pydantic>=2.8",
-  "PyYAML>=6.0",
-  "jsonschema>=4.23",
-  "beautifulsoup4>=4.12",
-  "lxml>=5.2",
-  "tqdm>=4.66",
 ]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/vladmurnik/web2spec"
+Repository = "https://github.com/vladmurnik/web2spec"
+Issues = "https://github.com/vladmurnik/web2spec/issues"
+Documentation = "https://github.com/vladmurnik/web2spec/tree/main/docs"
 
 [project.scripts]
 web2spec = "web2spec.cli:main"
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
-
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+web2spec = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-q --basetemp=.pytest_tmp"
+addopts = "-q"
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["web2spec"]
+
+[tool.ruff.format]
+quote-style = "double"

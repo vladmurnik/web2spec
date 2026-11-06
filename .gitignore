@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 .pytest_tmp/
 .ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
 logs/
 
 data/**
@@ -14,12 +18,14 @@ data/**
 models/**
 !models/**/
 !models/**/.gitkeep
+!models/checksums.sha256
 
 outputs/**
 !outputs/**/
 !outputs/**/.gitkeep
 
 *.gguf
+*.gguf.part
 *.safetensors
 *.bin
 
@@ -28,3 +34,8 @@ outputs/**
 
 # local llama.cpp build and downloaded binaries
 models/llama.cpp/
+
+# editor and OS noise
+.idea/
+.DS_Store
+Thumbs.db
