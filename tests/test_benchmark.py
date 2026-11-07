@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "27_benchmark.py"
@@ -21,6 +23,18 @@ def test_real_cases_load() -> None:
         "anthropic-pricing",
     }
     assert all(case["fields"] for case in cases)
+
+
+def test_cases_have_unique_ids_and_typed_fields() -> None:
+    cases = bench.load_cases()
+    ids = [case["id"] for case in cases]
+    assert len(ids) == len(set(ids))
+    for case in cases:
+        assert case["url"].startswith("https://")
+        date.fromisoformat(case["checked_at"])
+        for name, value in case["fields"].items():
+            assert re.fullmatch(r"[a-z][a-z0-9_]+", name)
+            assert isinstance(value, (str, int, float, bool))
 
 
 def test_compare_fields_accepts_model_number_strings() -> None:

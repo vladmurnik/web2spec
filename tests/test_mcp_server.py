@@ -327,6 +327,63 @@ def test_collect_reports_conflicts_instead_of_choosing(monkeypatch) -> None:
     assert payload["by_source"]["https://example.com/b"]["title"] == "Другой"
 
 
+def test_collect_multi_page_pricing_reports_missing_and_errors(monkeypatch) -> None:
+    good = "https://pricing.example/a"
+    failed = "https://pricing.example/b"
+    report = {
+        "task": "Compare pricing plans",
+        "pages": [
+            {
+                "url": good,
+                "status": "ok",
+                "entity": "pricing",
+                "facts": [
+                    {"name": "free_monthly_usd", "value": 0, "evidence": "$0"},
+                    {"name": "pro_monthly_usd", "value": 20, "evidence": "$20"},
+                ],
+                "missing": ["team_monthly_usd"],
+                "error": None,
+            },
+            {
+                "url": failed,
+                "status": "fetch_error",
+                "entity": "pricing",
+                "facts": [],
+                "missing": [],
+                "error": "http 403",
+            },
+        ],
+        "aggregate": {},
+        "stats": {"requested": 2, "ok": 1, "failed": 1, "by_status": {"ok": 1, "fetch_error": 1}},
+    }
+    monkeypatch.setattr(
+        mcp.search_cli, "_run_collector", lambda ns, urls: (report, None)
+    )
+    response = mcp.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "collect",
+                "arguments": {
+                    "task": "Compare pricing plans",
+                    "urls": [good, failed],
+                },
+            },
+        }
+    )
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["facts"] == {"free_monthly_usd": 0, "pro_monthly_usd": 20}
+    assert payload["missing"] == {"team_monthly_usd": [good]}
+    assert payload["sources"] == [good]
+    assert payload["errors"] == [
+        {"url": failed, "status": "fetch_error", "error": "http 403"}
+    ]
+    assert payload["stats"]["by_status"] == {"ok": 1, "fetch_error": 1}
+
+
 def test_collect_without_urls_runs_search(monkeypatch) -> None:
     called = {"search": 0, "domains": None}
 
