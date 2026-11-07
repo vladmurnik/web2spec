@@ -174,8 +174,9 @@ checkout, поэтому проект рассчитан на клонирова
 
 `download-models` проверяет SHA-256 по
 [`models/checksums.sha256`](models/checksums.sha256). Две 0.5B-модели
-прикреплены к GitHub release; 4B-аналитик скачивается из официального
-Qwen GGUF-репозитория. Веса не хранятся в git.
+прикреплены к GitHub release; там же лежат опциональные f16 GGUF и merged-архивы
+в HF-формате. 4B-аналитик скачивается из официального Qwen GGUF-репозитория.
+Веса не хранятся в git.
 
 Ожидаемый вывод `doctor`:
 
@@ -339,12 +340,12 @@ web2spec eval-q4 --limit 50
 
 Базовые модели — Apache-2.0. Дообученные GGUF прикреплены к GitHub release;
 те же артефакты можно зеркалировать на Hugging Face командой `upload-models`.
-Checksums, шаги пересборки, экспериментальные Q3_K_M/Q2_K и нюанс
-квантования — в [`docs/MODELS.md`](docs/MODELS.md). Для пересборки collector
-нужны обучающие данные, которых нет в git.
+Checksums, шаги пересборки, экспериментальные Q3_K_M/Q2_K, f16- и
+merged-артефакты, а также нюанс квантования — в
+[`docs/MODELS.md`](docs/MODELS.md). Для пересборки collector нужны обучающие
+данные, которых нет в git.
 
-Q3_K_M/Q2_K собраны локально; перед скачиванием их release-ассеты нужно
-прикрепить отдельно:
+Q3_K_M/Q2_K прикреплены к тому же release и скачиваются так:
 
 ```powershell
 web2spec download-models --only collector-q3   # экспериментальные planner + extractor

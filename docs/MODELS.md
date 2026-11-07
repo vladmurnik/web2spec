@@ -24,8 +24,25 @@ The files are not stored in git.
 Both are generated from the local f16 checkpoints and are **experimental**:
 the measured default remains Q4_K_M. A smaller file does not guarantee a lower
 peak VRAM because the KV cache and context dominate on the 4B analyst path.
-Their release assets are not attached to `v0.4.0` yet; the commands below work
-after the files are uploaded.
+Both variants are attached to the `v0.4.0` release and can be downloaded with
+the commands below.
+
+### Optional f16 and merged artifacts
+
+For re-quantization and the PyTorch fallback, the `v0.4.0` release also ships:
+
+| File | Contents | Size |
+| --- | --- | ---: |
+| `qwen05b-plan-f16.gguf` | planner, f16 GGUF | 948.1 MB |
+| `qwen05b-plan-extract-v2-f16.gguf` | extractor v2, f16 GGUF | 948.1 MB |
+| `qwen05b-plan-merged.zip` | merged planner, HF format | 953.4 MB |
+| `qwen05b-plan-extract-v2-merged.zip` | merged extractor v2, HF format | 953.4 MB |
+
+Their hashes are in
+[`models/checksums-extra.sha256`](../models/checksums-extra.sha256). Unzip the
+merged archives into `models/merged/`; the PyTorch fallback expects
+`models/merged/qwen05b-plan` and `models/merged/qwen05b-plan-extract-v2`.
+`download-models` does not fetch these optional artifacts.
 
 ## Download
 

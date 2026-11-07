@@ -170,7 +170,8 @@ library-only wheel.
 `download-models` verifies SHA-256 hashes from
 [`models/checksums.sha256`](models/checksums.sha256). The two 0.5B collector
 models are attached to the GitHub release; the 4B analyst comes from the
-official Qwen GGUF repository. Model files are not stored in git.
+official Qwen GGUF repository. Optional f16 GGUFs and merged HF-format archives
+are attached too. Model files are not stored in git.
 
 Expected `doctor` output:
 
@@ -335,11 +336,12 @@ OpenAI-compatible server). Without it, the task text is used as the query.
 Base models are Apache-2.0. The fine-tuned GGUFs are attached to the GitHub
 release; the same artifacts can be mirrored to Hugging Face with
 `upload-models`. See [`docs/MODELS.md`](docs/MODELS.md) for checksums, rebuild
-steps, optional Q3_K_M/Q2_K variants and the quantization caveat. Rebuilding the
-collector requires the training data, which is not committed.
+steps, optional Q3_K_M/Q2_K variants, f16 and merged artifacts, and the
+quantization caveat. Rebuilding the collector requires the training data, which
+is not committed.
 
-The Q3_K_M/Q2_K files are built locally and their release assets must be
-attached before these commands can download them:
+The Q3_K_M/Q2_K files are attached to the same release and can be downloaded
+with:
 
 ```powershell
 web2spec download-models --only collector-q3   # experimental smaller planner + extractor

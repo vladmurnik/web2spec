@@ -15,8 +15,10 @@ version of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Incremental collector and search runs through `--previous`: unchanged pages
   are reused by content hash without starting either model.
 - Experimental Q3_K_M and Q2_K collector GGUFs, with checksums and
-  `download-models --only collector-q3|collector-q2`; the files are built
-  locally and their release upload requires a GitHub token.
+  `download-models --only collector-q3|collector-q2`; the files are attached
+  to the `v0.4.0` release.
+- Optional f16 GGUFs and merged HF-format archives for both collector models,
+  attached to the `v0.4.0` release with `models/checksums-extra.sha256`.
 - `upload-models` and `docs/HF_MODEL_CARD.md` for the Hugging Face mirror; the
   actual upload requires an `HF_TOKEN` and is not performed automatically.
 - Dated real-page benchmark harness (`web2spec benchmark`) covering docs,

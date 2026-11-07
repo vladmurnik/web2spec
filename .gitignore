@@ -20,6 +20,7 @@ models/**
 !models/**/
 !models/**/.gitkeep
 !models/checksums.sha256
+!models/checksums-extra.sha256
 
 outputs/**
 !outputs/**/
