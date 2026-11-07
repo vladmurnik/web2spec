@@ -3,6 +3,33 @@
 All notable changes are documented here. The project follows a lightweight
 version of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- One-command setup scripts for Windows (`scripts/00_install.ps1`) and
+  Linux/macOS (`scripts/00_install.sh`): venv, editable install, optional
+  llama.cpp install, verified model download, and `doctor`.
+- SQLite page/search cache with a 24-hour default TTL, `--cache-ttl`,
+  `--no-cache`, and cache hit statistics.
+- Incremental collector and search runs through `--previous`: unchanged pages
+  are reused by content hash without starting either model.
+- Experimental Q3_K_M and Q2_K collector GGUFs, with checksums and
+  `download-models --only collector-q3|collector-q2`; the files are built
+  locally and their release upload requires a GitHub token.
+- `upload-models` and `docs/HF_MODEL_CARD.md` for the Hugging Face mirror; the
+  actual upload requires an `HF_TOKEN` and is not performed automatically.
+- Dated real-page benchmark harness (`web2spec benchmark`) covering docs,
+  API reference, pricing and product specs.
+- `content_hash` and `cache_hit` fields in collector reports.
+- Explicit caller-provided schemas: `collect --field name[:kind]` and MCP
+  `collect.fields` skip the planner and preserve field names exactly.
+
+### Changed
+
+- `download-models --only all` still fetches the three default runtime models;
+  smaller variants are explicit opt-ins.
+
 ## [0.4.0] - 2026-11-06
 
 ### Added

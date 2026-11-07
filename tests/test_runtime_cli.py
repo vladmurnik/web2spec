@@ -5,6 +5,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+from web2spec.cache import PageCache
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "21_collect_urls.py"
 _spec = importlib.util.spec_from_file_location("collect_urls", SCRIPT)
 assert _spec is not None and _spec.loader is not None
@@ -308,6 +310,200 @@ def test_cli_offline_end_to_end(tmp_path: Path, monkeypatch) -> None:
     assert report["pages"][0]["url"] == url
     assert report["aggregate"][url]["facts"] == {"title": "Чайник", "price": 990}
     assert "input_html" not in json.dumps(report)
+
+
+def test_fetch_online_uses_page_cache(tmp_path: Path, monkeypatch) -> None:
+    url = "https://example.com/cached"
+    cache = PageCache(tmp_path / "cache.sqlite", ttl_seconds=3600)
+    cache.put_page(url, status=200, html="<html><body>cached page</body></html>")
+
+    def explode(*args, **kwargs):
+        raise AssertionError("network fetch must not run on a cache hit")
+
+    monkeypatch.setattr(collect_urls, "fetch", explode)
+    html, error, cached = collect_urls._fetch_online(
+        url, None, 0.0, 20.0, first=True, cache=cache
+    )
+    assert error is None
+    assert cached is True
+    assert html is not None and "cached page" in html
+    cache.close()
+
+
+def test_cli_previous_reuses_unchanged_page(tmp_path: Path, monkeypatch) -> None:
+    url = "https://shop.example/product/mug"
+    html_dir = tmp_path / "html"
+    html_dir.mkdir()
+    (html_dir / f"{hashlib.sha1(url.encode('utf-8')).hexdigest()}.html").write_text(
+        HTML, encoding="utf-8"
+    )
+    out = tmp_path / "collected.json"
+    plan_raw = _plan_raw()
+    facts_raw = _facts_raw(
+        [
+            {"name": "title", "value": "Чайник", "evidence": "Чайник"},
+            {"name": "price", "value": 990, "evidence": "990 ₽"},
+        ]
+    )
+    monkeypatch.setattr(
+        collect_urls,
+        "generate_plans",
+        lambda items, model_dir, max_new_tokens, task, **kwargs: {
+            item_url: plan_raw for item_url, _ in items
+        },
+    )
+    monkeypatch.setattr(
+        collect_urls,
+        "generate_facts",
+        lambda items, model_dir, max_new_tokens, task, **kwargs: {
+            item_url: facts_raw for item_url, _, _ in items
+        },
+    )
+    argv = [
+        "--task",
+        "Extract product title and price",
+        "--url",
+        url,
+        "--html-dir",
+        str(html_dir),
+        "--out",
+        str(out),
+        "--planner",
+        "unused",
+        "--extractor",
+        "unused",
+    ]
+    assert collect_urls.main(argv) == 0
+
+    def no_models(*args, **kwargs):
+        raise AssertionError("models must not run for an unchanged page")
+
+    monkeypatch.setattr(collect_urls, "generate_plans", no_models)
+    monkeypatch.setattr(collect_urls, "generate_facts", no_models)
+    assert collect_urls.main([*argv, "--previous", str(out)]) == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["stats"]["reused_pages"] == 1
+    assert report["pages"][0]["status"] == "ok"
+    assert report["pages"][0]["content_hash"]
+
+
+def test_cli_explicit_fields_skip_planner(tmp_path: Path, monkeypatch) -> None:
+    url = "https://shop.example/product/mug"
+    html_dir = tmp_path / "html"
+    html_dir.mkdir()
+    (html_dir / f"{hashlib.sha1(url.encode('utf-8')).hexdigest()}.html").write_text(
+        HTML, encoding="utf-8"
+    )
+    out = tmp_path / "explicit.json"
+    facts_raw = _facts_raw(
+        [
+            {"name": "title", "value": "Чайник", "evidence": "Чайник"},
+            {"name": "price", "value": 990, "evidence": "990 ₽"},
+        ]
+    )
+
+    def no_planner(*args, **kwargs):
+        raise AssertionError("planner must not run when --field is provided")
+
+    monkeypatch.setattr(collect_urls, "generate_plans", no_planner)
+    monkeypatch.setattr(
+        collect_urls,
+        "generate_facts",
+        lambda items, model_dir, max_new_tokens, task, **kwargs: {
+            item_url: facts_raw for item_url, _, _ in items
+        },
+    )
+    code = collect_urls.main(
+        [
+            "--task",
+            "Extract product title and price",
+            "--url",
+            url,
+            "--html-dir",
+            str(html_dir),
+            "--out",
+            str(out),
+            "--planner",
+            "unused",
+            "--extractor",
+            "unused",
+            "--field",
+            "title:text",
+            "--field",
+            "price:number",
+        ]
+    )
+    assert code == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["stats"]["explicit_plan"] is True
+    assert [fact["name"] for fact in report["pages"][0]["facts"]] == [
+        "title",
+        "price",
+    ]
+
+
+def test_cli_previous_explicit_fields_filter_reused_facts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    url = "https://shop.example/product/mug"
+    html_dir = tmp_path / "html"
+    html_dir.mkdir()
+    (html_dir / f"{hashlib.sha1(url.encode('utf-8')).hexdigest()}.html").write_text(
+        HTML, encoding="utf-8"
+    )
+    task = "Extract product title and price"
+    out = tmp_path / "previous.json"
+    digest = hashlib.sha256(HTML.encode("utf-8")).hexdigest()
+    prior_page = collect_urls._empty_page(url)
+    prior_page.update(
+        {
+            "status": "ok",
+            "content_hash": digest,
+            "facts": [
+                {"name": "title", "value": "Чайник", "evidence": "Чайник"},
+                {"name": "price", "value": 990, "evidence": "990 ₽"},
+            ],
+            "missing": [],
+        }
+    )
+    out.write_text(
+        json.dumps({"task": task, "pages": [prior_page]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    def no_models(*args, **kwargs):
+        raise AssertionError("models must not run for an unchanged page")
+
+    monkeypatch.setattr(collect_urls, "generate_plans", no_models)
+    monkeypatch.setattr(collect_urls, "generate_facts", no_models)
+    result = tmp_path / "filtered.json"
+    code = collect_urls.main(
+        [
+            "--task",
+            task,
+            "--url",
+            url,
+            "--html-dir",
+            str(html_dir),
+            "--out",
+            str(result),
+            "--planner",
+            "unused",
+            "--extractor",
+            "unused",
+            "--previous",
+            str(out),
+            "--field",
+            "title:text",
+        ]
+    )
+    assert code == 0
+    report = json.loads(result.read_text(encoding="utf-8"))
+    page = report["pages"][0]
+    assert report["stats"]["reused_pages"] == 1
+    assert [fact["name"] for fact in page["facts"]] == ["title"]
+    assert page["missing"] == []
+    assert page["content_hash"] == digest
 
 
 def test_cli_offline_all_failed_returns_one(tmp_path: Path) -> None:

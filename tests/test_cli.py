@@ -16,6 +16,7 @@ def test_help_lists_main_commands() -> None:
         "search",
         "research",
         "mcp",
+        "benchmark",
         "doctor",
         "eval-q4",
     ):

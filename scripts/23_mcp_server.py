@@ -111,6 +111,16 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Что именно нужно найти, на естественном языке.",
                 },
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Необязательная явная схема полей: ['price:number', "
+                        "'title:text', 'in_stock:bool']. Можно добавить описание: "
+                        "'price:number:цена в рублях без скидки'. С явными полями "
+                        "planner не запускается, имена полей сохраняются точно."
+                    ),
+                },
                 "urls": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -209,6 +219,7 @@ def _namespace(
     context: int,
     startup_timeout: float,
     request_timeout: float,
+    fields: list[str] | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         task=task,
@@ -227,6 +238,8 @@ def _namespace(
         startup_timeout=startup_timeout,
         request_timeout=request_timeout,
         allow_partial=True,
+        field=list(fields or []),
+        fields=list(fields or []),
         plan_max_new_tokens=320,
         fact_max_new_tokens=384,
         collector_timeout=3600.0,
@@ -501,11 +514,15 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
     include_pages = bool(args.get("include_pages", False))
     raw_urls = args.get("urls") or []
     domains = args.get("domains") or []
+    raw_fields = args.get("fields") or []
     if not isinstance(raw_urls, list):
         raise ValueError("urls must be an array of strings")
     if not isinstance(domains, list):
         raise ValueError("domains must be an array of strings")
+    if not isinstance(raw_fields, list):
+        raise ValueError("fields must be an array of strings")
     urls = [str(url).strip() for url in raw_urls if str(url).strip()]
+    fields = [str(field).strip() for field in raw_fields if str(field).strip()]
 
     search_block: dict[str, Any] = {}
     warnings: list[str] = []
@@ -558,6 +575,7 @@ def tool_collect(args: dict[str, Any]) -> dict[str, Any]:
         context=cfg["context"],
         startup_timeout=cfg["startup_timeout"],
         request_timeout=cfg["request_timeout"],
+        fields=fields,
     )
     report, error = search_cli._run_collector(ns, urls)
     if error is not None:

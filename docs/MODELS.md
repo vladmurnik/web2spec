@@ -14,10 +14,25 @@ files and starts them through `llama-server`.
 The checksum manifest is [`models/checksums.sha256`](../models/checksums.sha256).
 The files are not stored in git.
 
+### Optional smaller collector quants
+
+| Role | Q3_K_M | Q2_K |
+| --- | ---: | ---: |
+| Planner | 339 MB | 323 MB |
+| Extractor | 339 MB | 323 MB |
+
+Both are generated from the local f16 checkpoints and are **experimental**:
+the measured default remains Q4_K_M. A smaller file does not guarantee a lower
+peak VRAM because the KV cache and context dominate on the 4B analyst path.
+Their release assets are not attached to `v0.4.0` yet; the commands below work
+after the files are uploaded.
+
 ## Download
 
 ```powershell
 web2spec download-models --only all
+web2spec download-models --only collector-q3
+web2spec download-models --only collector-q2
 web2spec download-models --check
 ```
 
@@ -35,6 +50,20 @@ https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF
 The two 0.5B collector GGUFs are attached to the GitHub release for the current
 version. If the release asset is unavailable, build them from the training
 pipeline described below.
+
+The repository includes an explicit, token-based path for mirroring the
+fine-tuned artifacts to Hugging Face:
+
+```powershell
+pip install -e ".[upload]"
+$env:HF_TOKEN = "hf_..."   # do not commit this token
+web2spec upload-models --dry-run
+web2spec upload-models
+```
+
+When uploaded, the mirror contains the Q4/Q3/Q2 GGUFs, the f16 GGUFs and the
+merged planner and extractor directories. The 4B analyst is not uploaded: it
+comes from the official Qwen repository.
 
 ## Provenance
 

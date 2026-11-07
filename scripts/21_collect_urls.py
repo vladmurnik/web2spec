@@ -33,6 +33,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from web2spec.cache import (  # noqa: E402
+    PageCache,
+    add_cache_arguments,
+    cache_from_args,
+)
 from web2spec.collect import RobotsCache, fetch  # noqa: E402
 from web2spec.eval import extract_json  # noqa: E402
 from web2spec.html_compress import compress_html  # noqa: E402
@@ -48,6 +53,7 @@ from web2spec.plan import (  # noqa: E402
     PlanError,
     load_factset_lenient,
     load_plan_lenient,
+    plan_from_fields,
     repair_factset,
     validate_factset,
 )
@@ -127,6 +133,8 @@ def _empty_page(url: str) -> dict[str, Any]:
         "repairs": {"evidence": [], "dropped": []},
         "dropped_foreign": [],
         "error": None,
+        "content_hash": None,
+        "cache_hit": False,
     }
 
 
@@ -515,17 +523,59 @@ def _read_offline(html_dir: Path, url: str) -> tuple[str | None, str | None]:
 
 
 def _fetch_online(
-    url: str, robots: RobotsCache, delay: float, timeout: float, first: bool
-) -> tuple[str | None, str | None]:
+    url: str,
+    robots: RobotsCache,
+    delay: float,
+    timeout: float,
+    first: bool,
+    cache: PageCache | None = None,
+) -> tuple[str | None, str | None, bool]:
+    if cache is not None:
+        cached = cache.get_page(url)
+        if cached is not None and cached.ok:
+            return cached.html, None, True
     if not robots.allowed(url):
-        return None, "robots.txt disallows this URL or robots.txt is unavailable"
+        return None, "robots.txt disallows this URL or robots.txt is unavailable", False
     if not first:
         time.sleep(max(delay, robots.delay(url)))
     result = fetch(url, timeout=timeout)
     if not result.ok:
         detail = result.error or f"http {result.status}"
-        return None, f"fetch failed: {detail}"
-    return result.html, None
+        return None, f"fetch failed: {detail}", False
+    if cache is not None:
+        cache.put_page(
+            url,
+            status=result.status,
+            html=result.html,
+            content_type=result.content_type,
+        )
+    return result.html, None, False
+
+
+def _load_previous(path: Path | None, task: str) -> dict[str, dict[str, Any]]:
+    """Load a prior report so unchanged pages can skip both models."""
+
+    if path is None:
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[warning] cannot read previous report {path}: {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(payload, dict) or payload.get("task") != task:
+        print(
+            "[warning] previous report has a different task; incremental reuse disabled",
+            file=sys.stderr,
+        )
+        return {}
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        return {}
+    loaded: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        if isinstance(page, dict) and isinstance(page.get("url"), str):
+            loaded[page["url"]] = page
+    return loaded
 
 
 def _plan_ok(plan_raw: str, task: str) -> bool:
@@ -536,11 +586,47 @@ def _plan_ok(plan_raw: str, task: str) -> bool:
     return plan is not None and bool(plan.fields) and plan.entity != "none"
 
 
+def _parse_field_specs(raw_specs: list[str]) -> list[tuple[str, str]]:
+    """Parse repeated ``--field name[:kind[:description]]`` values."""
+
+    valid_kinds = {"text", "number", "date", "url", "bool", "null"}
+    parsed: list[tuple[str, str] | tuple[str, str, str]] = []
+    for group in raw_specs:
+        item = group.strip()
+        if not item:
+            continue
+        pieces = item.split(":", 2)
+        name = pieces[0].strip().lower()
+        kind = (pieces[1].strip().lower() if len(pieces) > 1 else "") or "text"
+        why = pieces[2].strip() if len(pieces) > 2 else ""
+        if not name:
+            raise PlanError("empty field name")
+        if kind not in valid_kinds:
+            raise PlanError(
+                f"field {name!r}: kind must be one of {', '.join(sorted(valid_kinds))}"
+            )
+        parsed.append((name, kind, why) if why else (name, kind))
+    if len(parsed) > 12:
+        raise PlanError("at most 12 fields are allowed")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Задача + список URL → структурированные факты (JSON) без HTML"
+        description="Задача + список URL -> структурированные факты (JSON) без HTML"
     )
     parser.add_argument("--task", type=str, required=True, help="задача сбора данных")
+    parser.add_argument(
+        "--field",
+        action="append",
+        default=[],
+        metavar="NAME[:KIND[:DESCRIPTION]]",
+        help=(
+            "явное поле отчёта (можно повторять): name, name:number, "
+            "name:number:maximum price in RUB. DESCRIPTION помогает выбрать "
+            "нужную строку таблицы. С явными полями planner не запускается."
+        ),
+    )
     parser.add_argument(
         "--urls",
         type=Path,
@@ -590,6 +676,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-chars", type=int, default=12_000)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--delay", type=float, default=1.0)
+    add_cache_arguments(parser, default_path=REPO_ROOT / ".cache/web2spec.sqlite")
+    parser.add_argument(
+        "--previous",
+        type=Path,
+        default=None,
+        help="prior JSON report; unchanged pages are reused without model calls",
+    )
     parser.add_argument(
         "--html-dir",
         type=Path,
@@ -603,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "часть полей плана не найдена → missing вместо ошибки страницы "
+            "часть полей плана не найдена -> missing вместо ошибки страницы "
             "(по умолчанию включено; --no-allow-partial — строгая проверка)"
         ),
     )
@@ -618,6 +711,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-pages должен быть >= 1")
     if args.max_chars < 200:
         parser.error("--max-chars должен быть >= 200")
+    explicit_plan = None
+    if args.field:
+        try:
+            explicit_plan = plan_from_fields(task, _parse_field_specs(args.field))
+        except PlanError as exc:
+            parser.error(f"--field: {exc}")
 
     urls = collect_urls(args.urls, args.url)[: args.max_pages]
     if not urls:
@@ -626,24 +725,66 @@ def main(argv: list[str] | None = None) -> int:
     robots = None
     if args.html_dir is None:
         robots = RobotsCache(timeout=min(args.timeout, 15.0))
+    cache = cache_from_args(args)
+    previous = _load_previous(args.previous, task)
 
     pages_by_url: dict[str, dict[str, Any]] = {}
     items: list[tuple[str, str]] = []
     fetched = 0
+    cache_hits = 0
+    reused = 0
 
     for url in urls:
         page = _empty_page(url)
         pages_by_url[url] = page
         if args.html_dir is not None:
             html, error = _read_offline(args.html_dir, url)
+            cached = False
         else:
-            html, error = _fetch_online(
-                url, robots, args.delay, args.timeout, first=fetched == 0
+            html, error, cached = _fetch_online(
+                url,
+                robots,
+                args.delay,
+                args.timeout,
+                first=fetched == 0,
+                cache=cache,
             )
             fetched += 1
+            cache_hits += int(cached)
+        page["cache_hit"] = cached
         if error is not None or html is None:
             page["error"] = error or "empty response"
             print(f"[{page['status']}] {url}: {page['error']}", file=sys.stderr)
+            continue
+        digest = hashlib.sha256(html.encode("utf-8")).hexdigest()
+        page["content_hash"] = digest
+        prior = previous.get(url)
+        if (
+            prior is not None
+            and prior.get("status") == "ok"
+            and prior.get("content_hash") == digest
+        ):
+            reused_page = prior
+            if explicit_plan is not None:
+                wanted = [field.name for field in explicit_plan.fields]
+                prior_facts = [
+                    fact
+                    for fact in prior.get("facts", [])
+                    if isinstance(fact, dict) and fact.get("name") in wanted
+                ]
+                present = {fact.get("name") for fact in prior_facts}
+                reused_page = dict(prior)
+                reused_page["entity"] = "custom"
+                reused_page["facts"] = prior_facts
+                reused_page["missing"] = [
+                    name for name in wanted if name not in present
+                ]
+            reused_page = dict(reused_page)
+            reused_page["content_hash"] = digest
+            reused_page["cache_hit"] = cached
+            pages_by_url[url] = reused_page
+            reused += 1
+            print(f"[reused] {url}: unchanged content", file=sys.stderr)
             continue
         compressed = compress_html(html, max_chars=args.max_chars)
         if len(compressed) < MIN_HTML_CHARS:
@@ -655,7 +796,12 @@ def main(argv: list[str] | None = None) -> int:
 
     plan_raws: dict[str, str] = {}
     plan_batch_error: str | None = None
-    if items:
+    if items and explicit_plan is not None:
+        explicit_raw = json.dumps(
+            explicit_plan.model_dump(mode="json"), ensure_ascii=False
+        )
+        plan_raws = {url: explicit_raw for url, _ in items}
+    elif items:
         try:
             plan_raws = generate_plans(
                 items,
@@ -702,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
             fact_batch_error = f"extractor failed: {exc}"
 
     for url, html in items:
-        pages_by_url[url] = assemble_page(
+        page = assemble_page(
             url,
             html,
             plan_raws.get(url, ""),
@@ -714,10 +860,19 @@ def main(argv: list[str] | None = None) -> int:
             task=task,
             html_is_compressed=True,
         )
+        page["content_hash"] = pages_by_url[url].get("content_hash")
+        page["cache_hit"] = pages_by_url[url].get("cache_hit", False)
+        pages_by_url[url] = page
 
     pages = [pages_by_url[url] for url in urls]
     report = build_report(task, pages)
+    report["stats"]["cache"] = cache.as_dict() if cache is not None else None
+    report["stats"]["cache_hits"] = cache_hits
+    report["stats"]["reused_pages"] = reused
+    report["stats"]["explicit_plan"] = explicit_plan is not None
     write_report(args.out, report)
+    if cache is not None:
+        cache.close()
 
     for page in pages:
         print(
@@ -728,7 +883,8 @@ def main(argv: list[str] | None = None) -> int:
     stats = report["stats"]
     print(
         f"Готово: {stats['ok']}/{stats['requested']} страниц ok, "
-        f"{stats['failed']} с ошибкой → {args.out}"
+        f"{stats['failed']} с ошибкой, {cache_hits} из кэша, "
+        f"{reused} без изменений -> {args.out}"
     )
     return 0 if stats["ok"] > 0 else 1
 

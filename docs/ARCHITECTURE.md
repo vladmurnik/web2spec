@@ -60,7 +60,7 @@ URLs
 polite fetch (robots.txt, delay) --> compressed HTML + metadata header
   |
   v
-planner (0.5B) --> CollectionPlan: entity + requested fields
+planner (0.5B) or caller --field schema --> CollectionPlan
   |
   v
 extractor (0.5B) --> FactSet: name / value / evidence
@@ -71,13 +71,17 @@ repair_factset --> strict validate --> JSON report
 
 The collect path is implemented by `scripts/21_collect_urls.py`, with the
 schema and repair logic in `web2spec/plan.py`. It is the fast path for official
-pricing pages, documentation or a fixed list of articles.
+pricing pages, documentation or a fixed list of articles. If the caller supplies
+`--field name[:kind[:description]]`, the planner is skipped and the names are
+used verbatim; the description becomes the extractor's `why` hint for ambiguous
+table rows.
 
 ## Components
 
 | Component | Responsibility |
 | --- | --- |
 | `web2spec/collect.py` | HTTP fetch, gzip, redirects, robots.txt and crawl delay |
+| `web2spec/cache.py` | SQLite page/search cache with TTL and content hashes |
 | `web2spec/html_compress.py` | strip scripts/styles, keep content, extract metadata |
 | `web2spec/semantic.py` | split pages into headings, paragraphs and table rows |
 | `web2spec/plan.py` | `CollectionPlan`, `FactSet`, `repair_factset`, lenient parsing |
@@ -87,6 +91,22 @@ pricing pages, documentation or a fixed list of articles.
 | `web2spec/cli.py` | unified command dispatcher and `doctor` |
 | `scripts/23_mcp_server.py` | MCP stdio JSON-RPC server |
 | `scripts/00_download_models.py` | model download and SHA-256 verification |
+| `scripts/27_benchmark.py` | dated real-page collector benchmark |
+
+## Caching and incremental runs
+
+`collect`, `search`, and `research` share `.cache/web2spec.sqlite`. The cache
+stores only successful page HTML and successful search-result payloads, each
+with a timestamp, and defaults to a 24-hour TTL. `--cache-ttl HOURS` changes the
+window; `--no-cache` bypasses reads and writes. Errors are never cached.
+
+`collect --previous old.json` (and the same flag on `search`) computes a SHA-256
+of the fetched HTML and reuses a prior `ok` page only when the task and content
+hash match. Reused pages skip both model stages. The report exposes
+`content_hash`, `cache_hit`, and cache hit counts so the reuse is auditable.
+
+The cache contains raw page content. It is gitignored; delete the file to clear
+all local page history.
 
 ## Evidence lifecycle
 
@@ -178,6 +198,8 @@ minimum pages were usable. It never inflates the page count.
   bias which values the model notices. Exact evidence and source URLs make the
   result auditable; high-stakes numbers should still be checked at the source.
 - Model weights, datasets and reports are not committed.
+- The optional SQLite cache contains raw fetched pages in `.cache/`; it is
+  gitignored and local to the machine. Use `--no-cache` for a fully stateless run.
 
 ## Extension points
 

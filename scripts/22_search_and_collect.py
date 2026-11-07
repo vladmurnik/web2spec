@@ -33,6 +33,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from web2spec.cache import (  # noqa: E402
+    PageCache,
+    add_cache_arguments,
+    cache_from_args,
+)
 from web2spec.llama_runtime import (  # noqa: E402, F401
     DEFAULT_ANALYST,
     DEFAULT_DEVICE,
@@ -340,6 +345,7 @@ def search_urls(
     timeout: float = 20.0,
     search_only: bool = False,
     domains: list[str] | None = None,
+    cache: PageCache | None = None,
 ) -> tuple[dict[str, Any], list[str], list[str]]:
     """Run query generation + search; return (search_block, urls, warnings)."""
 
@@ -369,17 +375,25 @@ def search_urls(
         queries = list(dict.fromkeys(scoped + queries))[:8]
 
     search_fn = search_searxng if provider == "searxng" else search_ddg
+    cache_provider = provider if provider == "ddg" else f"searxng:{searxng_url}"
+    cached_queries = 0
     per_query: list[tuple[str, list[dict[str, Any]]]] = []
     for query in queries:
-        if provider == "searxng":
-            results, error = search_fn(
-                query, base_url=searxng_url, language=language, timeout=timeout
-            )
+        results = cache.get_search(cache_provider, query, language) if cache else None
+        if results is not None:
+            cached_queries += 1
         else:
-            results, error = search_fn(query, timeout=timeout)
-        if error is not None:
-            warnings.append(f"search failed for {query!r}: {error}")
-            results = []
+            if provider == "searxng":
+                results, error = search_fn(
+                    query, base_url=searxng_url, language=language, timeout=timeout
+                )
+            else:
+                results, error = search_fn(query, timeout=timeout)
+            if error is not None:
+                warnings.append(f"search failed for {query!r}: {error}")
+                results = []
+            elif cache is not None:
+                cache.put_search(cache_provider, query, language, results)
         per_query.append((query, results))
 
     candidates = rank_candidates(
@@ -403,6 +417,7 @@ def search_urls(
         "count": len(candidates),
         "search_only": search_only,
         "domains": domain_filter,
+        "cached_queries": cached_queries,
         "warnings": warnings,
     }
     return block, urls, warnings
@@ -455,6 +470,22 @@ def _collector_argv(args: argparse.Namespace, urls: list[str], out: Path) -> lis
         argv.extend(["--url", url])
     if args.html_dir is not None:
         argv.extend(["--html-dir", str(args.html_dir)])
+    cache_path = getattr(args, "cache", None)
+    if getattr(args, "no_cache", False):
+        argv.append("--no-cache")
+    elif cache_path is not None:
+        argv.extend(
+            [
+                "--cache",
+                str(cache_path),
+                "--cache-ttl",
+                str(getattr(args, "cache_ttl", 24.0)),
+            ]
+        )
+    if getattr(args, "previous", None) is not None:
+        argv.extend(["--previous", str(args.previous)])
+    for field in getattr(args, "field", []) or []:
+        argv.extend(["--field", str(field)])
     return argv
 
 
@@ -524,9 +555,16 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Задача → локальный поиск ссылок → сбор фактов без HTML"
+        description="Задача -> локальный поиск ссылок -> сбор фактов без HTML"
     )
     parser.add_argument("--task", type=str, required=True)
+    parser.add_argument(
+        "--field",
+        action="append",
+        default=[],
+        metavar="NAME[:KIND[:DESCRIPTION]]",
+        help="explicit report field; skips the planner model",
+    )
     parser.add_argument(
         "--provider", choices=("searxng", "ddg"), default="searxng"
     )
@@ -562,6 +600,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--llm-provider", choices=("ollama", "openai"), default="ollama")
     parser.add_argument("--llm-timeout", type=float, default=60.0)
     parser.add_argument("--timeout", type=float, default=20.0)
+    add_cache_arguments(parser, default_path=REPO_ROOT / ".cache/web2spec.sqlite")
+    parser.add_argument(
+        "--previous",
+        type=Path,
+        default=None,
+        help="prior collector report; unchanged pages are reused",
+    )
     parser.add_argument(
         "--search-only",
         action="store_true",
@@ -608,6 +653,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_results < 1 or args.max_pages < 1:
         parser.error("--max-results и --max-pages должны быть >= 1")
 
+    cache = cache_from_args(args)
     block, urls, warnings = search_urls(
         task,
         provider=args.provider,
@@ -627,14 +673,18 @@ def main(argv: list[str] | None = None) -> int:
             for part in group.split(",")
             if part.strip()
         ],
+        cache=cache,
     )
     for warning in warnings:
         print(f"[warning] {warning}", file=sys.stderr)
 
     if not urls:
         payload = build_output(task, block, None, "no candidate URLs found")
+        if cache is not None:
+            payload["search"]["cache"] = cache.as_dict()
+            cache.close()
         _write(args.out, payload)
-        print(f"Ссылки не найдены → {args.out}", file=sys.stderr)
+        print(f"Ссылки не найдены -> {args.out}", file=sys.stderr)
         return 1
 
     print(
@@ -642,18 +692,25 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     if args.search_only:
-        _write(args.out, build_output(task, block, None, None))
+        payload = build_output(task, block, None, None)
+        if cache is not None:
+            payload["search"]["cache"] = cache.as_dict()
+            cache.close()
+        _write(args.out, payload)
         return 0
 
     collector_report, error = _run_collector(args, urls)
     if error is not None:
         print(f"[error] {error}", file=sys.stderr)
     payload = build_output(task, block, collector_report, error)
+    if cache is not None:
+        payload["search"]["cache"] = cache.as_dict()
+        cache.close()
     _write(args.out, payload)
     stats = payload["stats"]
     print(
         f"Готово: {stats['ok']}/{stats['requested']} страниц ok, "
-        f"{stats['failed']} с ошибкой → {args.out}"
+        f"{stats['failed']} с ошибкой -> {args.out}"
     )
     if error is not None:
         return 1

@@ -105,9 +105,46 @@ aggregation, not answer quality across domains.
 A multi-domain research benchmark (tariffs, products, jobs) does not exist yet.
 Do not describe the 20/20 result as “research accuracy”.
 
+## Real-page collector benchmark
+
+[`benchmarks/cases.jsonl`](../benchmarks/cases.jsonl) adds dated gold cases for
+GitHub Actions limits, Python asyncio, Stripe API errors, Anthropic/Supabase/
+Vercel pricing, and MacBook Air specifications. The harness runs the real
+collector and compares field values, not a saved prediction file:
+
+```powershell
+web2spec benchmark
+```
+
+The gold values were read from the pages on `2026-11-07`.
+
+### Measured result (2026-11-07)
+
+Reference machine, Q4_K_M planner/extractor, Vulkan0, `--no-cache`, 7 cases /
+19 fields:
+
+| Case | Exact fields |
+| --- | ---: |
+| GitHub Actions limits | 1 / 3 |
+| Python asyncio | 0 / 2 |
+| Stripe API errors | 0 / 3 (invalid FactSet) |
+| Anthropic pricing | 2 / 3 |
+| Supabase pricing | 2 / 3 |
+| Vercel pricing | 2 / 2 (exact case) |
+| MacBook Air specs | 1 / 3 |
+
+Overall: **1/7 exact cases (14.3%)**, **8/19 matched fields (42.1%)**.
+The report is in `data/reports/benchmark_2026-11-07.json` locally and is not
+committed. This is a deliberately hard, tiny slice; it is not a general quality
+claim. The dominant failure is table-row disambiguation: the 0.5B extractor
+picked “self-hosted 5 days” instead of “GitHub-hosted 6 hours”, and “wireless
+web 15 hours” instead of “video streaming 18 hours”. One Stripe case produced an
+invalid FactSet. Treat page drift as a benchmark failure, not a model win, and
+rerun before quoting the numbers.
+
 ## What is not measured
 
-- extraction quality on job, product, real-estate, news or tariff pages;
+- broad extraction quality on job, real-estate, news or tariff pages;
 - research answer correctness on anything other than Habr fixtures;
 - recall against the open web (search coverage);
 - behavior under WAF, captcha, JavaScript-only sites or authentication;

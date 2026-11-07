@@ -19,6 +19,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from web2spec.cache import (  # noqa: E402
+    PageCache,
+    add_cache_arguments,
+    cache_from_args,
+)
 from web2spec.collect import RobotsCache, fetch  # noqa: E402
 from web2spec.llama_runtime import (  # noqa: E402
     DEFAULT_ANALYST,
@@ -104,7 +109,12 @@ def _local_html(html_dir: Path | None, url: str) -> Path | None:
     return html_dir / f"{hashlib.sha1(url.encode('utf-8')).hexdigest()}.html"
 
 
-def _fetch_fn(html_dir: Path | None, timeout: float, delay: float):
+def _fetch_fn(
+    html_dir: Path | None,
+    timeout: float,
+    delay: float,
+    cache: PageCache | None = None,
+):
     robots = RobotsCache(timeout=min(timeout, 15.0))
 
     def load(url: str) -> tuple[str | None, str | None]:
@@ -113,6 +123,10 @@ def _fetch_fn(html_dir: Path | None, timeout: float, delay: float):
             if local.is_file():
                 return local.read_text(encoding="utf-8", errors="replace"), None
             return None, f"local fixture not found: {local.name}"
+        if cache is not None:
+            cached = cache.get_page(url)
+            if cached is not None and cached.ok:
+                return cached.html, None
         if not robots.allowed(url):
             return None, "robots.txt disallows this URL or is unavailable"
         time.sleep(max(delay, robots.delay(url)))
@@ -121,21 +135,44 @@ def _fetch_fn(html_dir: Path | None, timeout: float, delay: float):
             return None, result.error
         if not result.html:
             return None, f"empty response (http {result.status})"
+        if cache is not None:
+            cache.put_page(
+                url,
+                status=result.status,
+                html=result.html,
+                content_type=result.content_type,
+            )
         return result.html, None
 
     return load
 
 
-def _search_fn(provider: str, searxng_url: str, language: str, timeout: float):
+def _search_fn(
+    provider: str,
+    searxng_url: str,
+    language: str,
+    timeout: float,
+    cache: PageCache | None = None,
+):
+    cache_provider = provider if provider == "ddg" else f"searxng:{searxng_url}"
+
     def search(query: str) -> tuple[list[dict[str, Any]], str | None]:
+        if cache is not None:
+            cached = cache.get_search(cache_provider, query, language)
+            if cached is not None:
+                return cached, None
         if provider == "searxng":
-            return search_cli.search_searxng(
+            results, error = search_cli.search_searxng(
                 query,
                 base_url=searxng_url,
                 language=language,
                 timeout=timeout,
             )
-        return search_cli.search_ddg(query, timeout=timeout)
+        else:
+            results, error = search_cli.search_ddg(query, timeout=timeout)
+        if cache is not None and error is None:
+            cache.put_search(cache_provider, query, language, results)
+        return results, error
 
     return search
 
@@ -166,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request-timeout", type=float, default=300.0)
     parser.add_argument("--fetch-timeout", type=float, default=20.0)
     parser.add_argument("--delay", type=float, default=1.0)
+    add_cache_arguments(parser, default_path=REPO_ROOT / ".cache/web2spec.sqlite")
     parser.add_argument("--max-chunks", type=int, default=6)
     parser.add_argument("--chunk-chars", type=int, default=1400)
     parser.add_argument("--selected-chars", type=int, default=7000)
@@ -175,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO_ROOT / "data/reports/research.json",
     )
     args = parser.parse_args(argv)
+    cache = cache_from_args(args)
 
     min_pages, max_pages = clamp_pages(args.min_pages, args.max_pages)
     domains = _domains([*args.domain, args.domains])
@@ -207,9 +246,15 @@ def main(argv: list[str] | None = None) -> int:
             args.task,
             llm=analyst,
             search_fn=_search_fn(
-                args.provider, args.searxng_url, args.language, args.fetch_timeout
+                args.provider,
+                args.searxng_url,
+                args.language,
+                args.fetch_timeout,
+                cache=cache,
             ),
-            fetch_fn=_fetch_fn(args.html_dir, args.fetch_timeout, args.delay),
+            fetch_fn=_fetch_fn(
+                args.html_dir, args.fetch_timeout, args.delay, cache=cache
+            ),
             config=config,
             urls=urls,
             source_hints=[*args.source_hint, *domains],
@@ -229,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:
         "domains": domains,
         "provider": args.provider,
         "analyst": str(args.analyst),
+        "cache": cache.as_dict() if cache is not None else None,
     }
+    if cache is not None:
+        cache.close()
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(

@@ -46,6 +46,10 @@ def test_tools_list_contract() -> None:
     assert "urls" in collect["inputSchema"]["properties"]
     assert "domains" in collect["inputSchema"]["properties"]
     assert "include_pages" in collect["inputSchema"]["properties"]
+    assert "fields" in collect["inputSchema"]["properties"]
+    fields_schema = collect["inputSchema"]["properties"]["fields"]
+    assert fields_schema["type"] == "array"
+    assert fields_schema["items"] == {"type": "string"}
 
 
 def test_research_tool_clamps_pages_and_returns_report(monkeypatch) -> None:
@@ -197,6 +201,40 @@ def test_collect_with_urls_returns_compact_facts(monkeypatch) -> None:
     assert payload["missing"] == {"published_at": ["https://example.com/a"]}
     assert payload["sources"] == ["https://example.com/a"]
     assert "evidence" not in response["result"]["content"][0]["text"]
+
+
+def test_collect_passes_explicit_fields_to_collector(monkeypatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(ns, urls):
+        seen["fields"] = list(ns.fields)
+        argv = mcp.search_cli._collector_argv(ns, urls, Path("out.json"))
+        seen["argv"] = [
+            argv[index + 1]
+            for index, item in enumerate(argv)
+            if item == "--field"
+        ]
+        return _report(), None
+
+    monkeypatch.setattr(mcp.search_cli, "_run_collector", fake_run)
+    response = mcp.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "collect",
+                "arguments": {
+                    "task": "найди цену",
+                    "urls": ["https://example.com/a"],
+                    "fields": ["price:number:цена в рублях", "title:text"],
+                },
+            },
+        }
+    )
+    assert response["result"]["isError"] is False
+    assert seen["fields"] == ["price:number:цена в рублях", "title:text"]
+    assert seen["argv"] == ["price:number:цена в рублях", "title:text"]
 
 
 def test_collect_include_evidence(monkeypatch) -> None:

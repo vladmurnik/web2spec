@@ -47,6 +47,8 @@ def test_sha256_and_verify(tmp_path: Path) -> None:
 
 def test_selected_groups() -> None:
     assert [m.name for m in dl._selected("collector")] == ["planner", "extractor"]
+    assert [m.name for m in dl._selected("collector-q3")] == ["planner-q3", "extractor-q3"]
+    assert [m.name for m in dl._selected("collector-q2")] == ["planner-q2", "extractor-q2"]
     assert [m.name for m in dl._selected("analyst")] == ["analyst"]
     assert len(dl._selected("all")) == 3
 

@@ -39,8 +39,11 @@ GGUF-модели через `llama-server` и держит в памяти ро
 ## Измеренные результаты
 
 Это прокси-замеры, а не общий бенчмарк. Collector проверен на **50 held-out
-парах задача/страница из 18 статей Habr**. Для вакансий, товаров,
-недвижимости, тарифов и других типов страниц измерений пока нет.
+парах задача/страница из 18 статей Habr**. Отдельный датированный срез реальных
+страниц (документация, API, цены, характеристики товара) дал **1/7 точных
+кейсов и 8/19 полей** на Q4_K_M. Низкий результат оставлен видимым: он показывает
+реальные ошибки выбора строки таблицы и не является общим заявлением о качестве.
+Вакансии, недвижимость, новости и тарифы по-прежнему не покрыты.
 
 | Путь | Task success | Fact F1 | Evidence | Неверных значений после repair | Скорость |
 | --- | ---: | ---: | --- | ---: | ---: |
@@ -99,6 +102,18 @@ URL -> вежливый fetch + robots.txt -> сжатый HTML + metadata heade
 
 `collect` не обходит сайт. Он обрабатывает ровно переданные URL.
 
+Если схема уже известна, передайте `--field name[:kind[:description]]`
+(можно повторять): planner не запускается, имена полей сохраняются точно.
+
+```powershell
+web2spec collect --task "Собери цену и наличие" --url https://shop.example/item `
+  --field "price:number:цена в рублях без скидки" --field in_stock:bool
+```
+
+Типы: `text`, `number`, `date`, `url`, `bool`, `null`. Описание видит extractor;
+оно помогает выбрать нужную строку таблицы. MCP-инструмент `collect` принимает
+тот же список в `fields`.
+
 ### Инвариант evidence
 
 Факт принимается только тогда, когда его `evidence` — точная подстрока
@@ -120,21 +135,34 @@ URL -> вежливый fetch + robots.txt -> сжатый HTML + metadata heade
 
 ### Установка
 
+Одна команда в Windows:
+
 ```powershell
 git clone https://github.com/vladmurnik/web2spec.git
 cd web2spec
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-web2spec download-models --only all
-web2spec doctor
+powershell -ExecutionPolicy Bypass -File scripts/00_install.ps1
 ```
 
-На Linux/macOS:
+Добавьте `-InstallLlama`, чтобы поставить `llama.cpp` через `winget`, `-Dev`
+для тестовых зависимостей или `-SkipModels`, чтобы пропустить скачивание.
+
+Одна команда в Linux/macOS:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/vladmurnik/web2spec.git
+cd web2spec
+bash scripts/00_install.sh
+```
+
+Добавьте `--dev` для тестовых зависимостей или `--skip-models`, чтобы
+пропустить скачивание. Скрипты создают `.venv`, ставят пакет, проверяют
+SHA-256 моделей и запускают `web2spec doctor`.
+
+Ручной вариант:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 web2spec download-models --only all
 web2spec doctor
@@ -158,6 +186,22 @@ Qwen GGUF-репозитория. Веса не хранятся в git.
 [OK  ] llama-server: .../llama-server
 [OK  ] Python: 3.12.x
 ```
+
+### Кэш повторных запусков
+
+`collect`, `search` и `research` держат скачанные страницы и результаты поиска
+в `.cache/web2spec.sqlite` 24 часа. Это удешевляет повторные запуски, но не
+превращает устаревшие страницы в вечные факты:
+
+```powershell
+web2spec collect --task "..." --url https://example.com/page
+web2spec collect --task "..." --url https://example.com/page --cache-ttl 1
+web2spec collect --task "..." --url https://example.com/page --no-cache
+```
+
+Флаг `--previous data/reports/old.json` в `collect` и `search` переиспользует
+страницы, у которых не изменился content hash. В отчёте есть `content_hash`,
+`cache_hit` и блок `cache` в `stats`, поэтому переиспользование прозрачно.
 
 ### Первый запуск: известные URL
 
@@ -251,12 +295,15 @@ web2spec collect --task "..." --urls data/urls.txt
 web2spec search  --task "..." --provider ddg --search-only
 web2spec research --task "..." --domains vendor-x.ru --min-pages 20
 web2spec mcp
+web2spec benchmark
 web2spec eval-q4 --limit 50
 ```
 
 | Команда | Назначение |
 | --- | --- |
 | `download-models` | скачать GGUF и проверить checksums |
+| `upload-models` | зеркалировать дообученные артефакты на Hugging Face |
+| `benchmark` | прогнать датированные реальные страницы через collector |
 | `doctor` | проверить модели, `llama-server` и Python |
 | `collect` | задача + URL -> структурированные факты |
 | `search` | задача -> запросы -> локальный поиск -> collector |
@@ -290,10 +337,19 @@ web2spec eval-q4 --limit 50
 | Planner (`collect`) | `qwen05b-plan-Q4_K_M.gguf` | 379.4 MB | дообученный Qwen2.5-0.5B |
 | Extractor (`collect`) | `qwen05b-plan-extract-v2-Q4_K_M.gguf` | 379.4 MB | дообученный Qwen2.5-0.5B |
 
-Базовые модели — Apache-2.0. Дообученные GGUF публикуются вместе с проектом;
-checksums, шаги пересборки и нюанс квантования — в
-[`docs/MODELS.md`](docs/MODELS.md). Для пересборки collector нужны обучающие
-данные, которых нет в git.
+Базовые модели — Apache-2.0. Дообученные GGUF прикреплены к GitHub release;
+те же артефакты можно зеркалировать на Hugging Face командой `upload-models`.
+Checksums, шаги пересборки, экспериментальные Q3_K_M/Q2_K и нюанс
+квантования — в [`docs/MODELS.md`](docs/MODELS.md). Для пересборки collector
+нужны обучающие данные, которых нет в git.
+
+Q3_K_M/Q2_K собраны локально; перед скачиванием их release-ассеты нужно
+прикрепить отдельно:
+
+```powershell
+web2spec download-models --only collector-q3   # экспериментальные planner + extractor
+web2spec download-models --only collector-q2
+```
 
 PyTorch fallback (`--backend hf`) требует extra `hf`:
 

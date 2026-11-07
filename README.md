@@ -39,8 +39,10 @@ a time.
 
 These are proxy measurements, not a general benchmark. The collector was
 evaluated on **50 held-out task/page pairs from 18 article/Habr URLs only**.
-No measured results exist yet for job, product, real-estate, tariff or other
-page types.
+A separate dated real-page slice covers docs, API reference, pricing and product
+specs: **1/7 exact cases and 8/19 matched fields** with Q4_K_M. That low result
+is kept visible because it exposes real table-row failures; it is not a general
+quality claim. Broad job, real-estate, news and tariff coverage is still absent.
 
 | Path | Task success | Fact F1 | Evidence | Wrong values after repair | Speed |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -97,7 +99,17 @@ URLs -> polite fetch + robots.txt -> compressed HTML + metadata header
 
 `collect` does not crawl a site. It processes exactly the URLs it is given.
 
-### Evidence invariant
+When the caller already knows the schema, pass `--field name[:kind[:description]]`
+(repeatable) to skip the planner and keep field names exact:
+
+```powershell
+web2spec collect --task "Collect price and availability" --url https://shop.example/item `
+  --field "price:number:price in RUB without discounts" --field in_stock:bool
+```
+
+Kinds: `text`, `number`, `date`, `url`, `bool`, `null`. Descriptions are shown
+to the extractor and disambiguate rows such as "GitHub-hosted" versus
+"self-hosted". The MCP `collect` tool accepts the same list as `fields`.
 
 A fact is accepted only when its `evidence` is an exact substring of the
 compressed page. `repair_factset` tries to re-anchor evidence to a nearby exact
@@ -118,21 +130,34 @@ memory.
 
 ### Install
 
+One command on Windows:
+
 ```powershell
 git clone https://github.com/vladmurnik/web2spec.git
 cd web2spec
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-web2spec download-models --only all
-web2spec doctor
+powershell -ExecutionPolicy Bypass -File scripts/00_install.ps1
 ```
 
-On Linux/macOS:
+Add `-InstallLlama` to install `llama.cpp` through `winget`, `-Dev` to install
+test dependencies, or `-SkipModels` to skip the download.
+
+One command on Linux/macOS:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/vladmurnik/web2spec.git
+cd web2spec
+bash scripts/00_install.sh
+```
+
+Add `--dev` for test dependencies or `--skip-models` to skip the download.
+The scripts create `.venv`, install the package, verify the GGUF checksums, and
+run `web2spec doctor`.
+
+Manual fallback:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 web2spec download-models --only all
 web2spec doctor
@@ -156,6 +181,22 @@ Expected `doctor` output:
 [OK  ] llama-server: .../llama-server
 [OK  ] Python: 3.12.x
 ```
+
+### Cached repeat runs
+
+`collect`, `search`, and `research` keep fetched pages and search results in
+`.cache/web2spec.sqlite` for 24 hours. This makes repeated runs cheaper without
+turning stale pages into permanent facts:
+
+```powershell
+web2spec collect --task "..." --url https://example.com/page
+web2spec collect --task "..." --url https://example.com/page --cache-ttl 1
+web2spec collect --task "..." --url https://example.com/page --no-cache
+```
+
+Use `--previous data/reports/old.json` on `collect` or `search` to reuse pages
+whose content hash did not change. The report contains `content_hash`,
+`cache_hit`, and a `cache` block in `stats`, so reuse is auditable.
 
 ### First run: known URLs
 
@@ -249,12 +290,15 @@ web2spec collect --task "..." --urls data/urls.txt
 web2spec search  --task "..." --provider ddg --search-only
 web2spec research --task "..." --domains vendor-x.ru --min-pages 20
 web2spec mcp
+web2spec benchmark
 web2spec eval-q4 --limit 50
 ```
 
 | Command | Purpose |
 | --- | --- |
 | `download-models` | fetch GGUF models and verify checksums |
+| `upload-models` | mirror fine-tuned artifacts to Hugging Face |
+| `benchmark` | run dated real-page cases through the collector |
 | `doctor` | check models, `llama-server` and Python |
 | `collect` | task + URLs -> structured facts |
 | `search` | task -> queries -> local search -> collector |
@@ -288,10 +332,19 @@ OpenAI-compatible server). Without it, the task text is used as the query.
 | Planner (`collect`) | `qwen05b-plan-Q4_K_M.gguf` | 379.4 MB | fine-tuned Qwen2.5-0.5B |
 | Extractor (`collect`) | `qwen05b-plan-extract-v2-Q4_K_M.gguf` | 379.4 MB | fine-tuned Qwen2.5-0.5B |
 
-Base models are Apache-2.0. The fine-tuned GGUFs are released with this
-project; see [`docs/MODELS.md`](docs/MODELS.md) for checksums, rebuild steps and
-the quantization caveat. Rebuilding the collector requires the training data,
-which is not committed.
+Base models are Apache-2.0. The fine-tuned GGUFs are attached to the GitHub
+release; the same artifacts can be mirrored to Hugging Face with
+`upload-models`. See [`docs/MODELS.md`](docs/MODELS.md) for checksums, rebuild
+steps, optional Q3_K_M/Q2_K variants and the quantization caveat. Rebuilding the
+collector requires the training data, which is not committed.
+
+The Q3_K_M/Q2_K files are built locally and their release assets must be
+attached before these commands can download them:
+
+```powershell
+web2spec download-models --only collector-q3   # experimental smaller planner + extractor
+web2spec download-models --only collector-q2
+```
 
 The PyTorch fallback (`--backend hf`) requires the `hf` extra:
 

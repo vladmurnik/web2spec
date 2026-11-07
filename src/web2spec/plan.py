@@ -98,6 +98,51 @@ class CollectionPlan(BaseModel):
         return self
 
 
+def plan_from_fields(
+    task: str,
+    fields: list[tuple[str, str] | tuple[str, str, str]],
+) -> CollectionPlan:
+    """Build a deterministic plan from caller-provided field definitions.
+
+    Each item is ``(name, kind)`` or ``(name, kind, description)``.  The
+    description is passed to the extractor as ``why`` and is the main way to
+    disambiguate rows such as "GitHub-hosted" versus "self-hosted".  This is the
+    MCP/API-friendly path: the caller already knows the schema, so the 0.5B
+    planner is not asked to invent one.
+    """
+
+    if not fields:
+        raise PlanError("at least one field is required")
+    specs: list[dict[str, Any]] = []
+    for spec in fields:
+        name, kind = spec[0], spec[1]
+        why = spec[2] if len(spec) > 2 and spec[2] else "requested by the caller"
+        if len(why) > 200:
+            raise PlanError(f"field {name!r}: description must be at most 200 characters")
+        specs.append(
+            {
+                "name": name,
+                "why": why,
+                "required": True,
+                "kind": kind or "text",
+            }
+        )
+    payload = {
+        "version": PLAN_VERSION,
+        "goal": task.strip()[:300],
+        "entity": "custom",
+        "entry": "detail",
+        "fields": specs,
+    }
+    try:
+        plan = CollectionPlan.model_validate(payload)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first["loc"]) or "<root>"
+        raise PlanError(f"{location}: {first['msg']}") from exc
+    return plan
+
+
 def load_plan(raw: Any) -> CollectionPlan:
     """Parse a plan from a dict, a wrapped ``{"plan": ...}`` dict, or JSON text."""
 

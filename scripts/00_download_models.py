@@ -60,6 +60,38 @@ MODELS = {
         f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q4_K_M.gguf",
         "380 MB",
     ),
+    "planner-q3": Model(
+        "planner-q3",
+        "qwen05b-plan-Q3_K_M.gguf",
+        f"{RELEASE_BASE}/qwen05b-plan-Q3_K_M.gguf",
+        "340 MB",
+    ),
+    "extractor-q3": Model(
+        "extractor-q3",
+        "qwen05b-plan-extract-v2-Q3_K_M.gguf",
+        f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q3_K_M.gguf",
+        "340 MB",
+    ),
+    "planner-q2": Model(
+        "planner-q2",
+        "qwen05b-plan-Q2_K.gguf",
+        f"{RELEASE_BASE}/qwen05b-plan-Q2_K.gguf",
+        "325 MB",
+    ),
+    "extractor-q2": Model(
+        "extractor-q2",
+        "qwen05b-plan-extract-v2-Q2_K.gguf",
+        f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q2_K.gguf",
+        "325 MB",
+    ),
+}
+
+DEFAULT_MODELS = ("analyst", "planner", "extractor")
+GROUPS = {
+    "all": DEFAULT_MODELS,
+    "collector": ("planner", "extractor"),
+    "collector-q3": ("planner-q3", "extractor-q3"),
+    "collector-q2": ("planner-q2", "extractor-q2"),
 }
 
 
@@ -148,10 +180,8 @@ def download(
 
 
 def _selected(only: str) -> list[Model]:
-    if only == "all":
-        return list(MODELS.values())
-    if only == "collector":
-        return [MODELS["planner"], MODELS["extractor"]]
+    if only in GROUPS:
+        return [MODELS[name] for name in GROUPS[only]]
     return [MODELS[only]]
 
 
@@ -159,9 +189,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download and verify web2spec GGUF models")
     parser.add_argument(
         "--only",
-        choices=("all", "collector", *MODELS),
+        choices=(*GROUPS, *MODELS),
         default="all",
-        help="model or group to download (default: all)",
+        help=(
+            "model or group: all (default runtime), collector (Q4_K_M), "
+            "collector-q3, collector-q2, or one model name"
+        ),
     )
     parser.add_argument("--dest", type=Path, default=DEFAULT_DEST)
     parser.add_argument("--checksums", type=Path, default=DEFAULT_CHECKSUMS)

@@ -16,6 +16,7 @@ from web2spec.plan import (
     load_factset_lenient,
     load_plan,
     load_plan_lenient,
+    plan_from_fields,
     plan_target,
     repair_factset,
     validate_factset,
@@ -67,6 +68,29 @@ def _sample(target: dict) -> dict:
         "target": target,
         "meta": {"lang": "ru", "complexity": 2, "source_url": "https://example.ru"},
     }
+
+
+def test_plan_from_fields_preserves_names_and_kinds() -> None:
+    plan = plan_from_fields(
+        "Collect price and stock",
+        [
+            ("price", "number", "price in RUB without discounts"),
+            ("in_stock", "bool"),
+        ],
+    )
+    assert [field.name for field in plan.fields] == ["price", "in_stock"]
+    assert [field.kind for field in plan.fields] == ["number", "bool"]
+    assert plan.fields[0].why == "price in RUB without discounts"
+    assert plan.fields[1].why == "requested by the caller"
+    assert all(field.required for field in plan.fields)
+    assert plan.entity == "custom"
+
+
+def test_plan_from_fields_rejects_empty_and_bad_names() -> None:
+    with pytest.raises(PlanError):
+        plan_from_fields("Collect", [])
+    with pytest.raises(PlanError):
+        plan_from_fields("Collect", [("Bad Name", "text")])
 
 
 def test_valid_plan() -> None:
