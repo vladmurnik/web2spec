@@ -67,6 +67,43 @@ def _normalize(value: Any) -> Any:
     return text.strip(" .,;:!?")
 
 
+def _parse_number(text: str) -> float | None:
+    """Parse a model number string without losing grouped thousands.
+
+    Models often return ``$120,000`` or ``1.234,50`` instead of ``120000`` and
+    ``1234.5``.  A naive ``replace(",", ".")`` turns the first value into 120,
+    so detect the decimal separator before removing grouping characters.
+    """
+
+    compact = re.sub(r"[\s\u00a0\u202f]", "", text)
+    match = re.search(r"-?\d+(?:[.,]\d+)*", compact)
+    if not match:
+        return None
+    raw = match.group(0)
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            # European format: 1.234,50 -> 1234.50
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            # Anglo format: 1,234.50 -> 1234.50
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        integer, _, fraction = raw.rpartition(",")
+        if len(fraction) == 3 and integer.replace(",", "").lstrip("-").isdigit():
+            # Grouped integer: 120,000 -> 120000
+            raw = raw.replace(",", "")
+        else:
+            # Decimal comma: 1,5 -> 1.5
+            raw = raw.replace(",", ".")
+    if raw.count(".") > 1:
+        # Remaining dots are grouping separators: 1.234.567 -> 1234567
+        raw = raw.replace(".", "")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def _as_expected_type(actual: Any, expected: Any) -> Any:
     """Coerce common model output strings to the expected number/bool type."""
 
@@ -81,12 +118,9 @@ def _as_expected_type(actual: Any, expected: Any) -> Any:
         and not isinstance(expected, bool)
         and isinstance(actual, str)
     ):
-        match = re.search(r"-?\d+(?:[.,]\d+)?", actual.replace(" ", ""))
-        if match:
-            try:
-                return float(match.group(0).replace(",", "."))
-            except ValueError:
-                pass
+        number = _parse_number(actual)
+        if number is not None:
+            return number
     return actual
 
 
