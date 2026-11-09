@@ -173,10 +173,10 @@ checkout, поэтому проект рассчитан на клонирова
 библиотечный wheel.
 
 `download-models` проверяет SHA-256 по
-[`models/checksums.sha256`](models/checksums.sha256). Две 0.5B-модели
-прикреплены к GitHub release; там же лежат опциональные f16 GGUF и merged-архивы
-в HF-формате. 4B-аналитик скачивается из официального Qwen GGUF-репозитория.
-Веса не хранятся в git.
+[`models/checksums.sha256`](models/checksums.sha256). Две Q4_K_M-модели
+collector прикреплены к GitHub release; 4B-аналитик скачивается из официального
+Qwen GGUF-репозитория. Опциональные Q3_K_M/Q2_K, f16 и merged-артефакты
+существуют только локально и не распространяются. Веса не хранятся в git.
 
 Ожидаемый вывод `doctor`:
 
@@ -338,19 +338,16 @@ web2spec eval-q4 --limit 50
 | Planner (`collect`) | `qwen05b-plan-Q4_K_M.gguf` | 379.4 MB | дообученный Qwen2.5-0.5B |
 | Extractor (`collect`) | `qwen05b-plan-extract-v2-Q4_K_M.gguf` | 379.4 MB | дообученный Qwen2.5-0.5B |
 
-Базовые модели — Apache-2.0. Дообученные GGUF прикреплены к GitHub release;
-те же артефакты можно зеркалировать на Hugging Face командой `upload-models`.
-Checksums, шаги пересборки, экспериментальные Q3_K_M/Q2_K, f16- и
+Базовые модели — Apache-2.0. Q4_K_M GGUF collector прикреплены к GitHub release;
+те же runtime-артефакты можно зеркалировать на Hugging Face командой
+`upload-models`. Checksums, шаги пересборки, локальные Q3_K_M/Q2_K, f16- и
 merged-артефакты, а также нюанс квантования — в
 [`docs/MODELS.md`](docs/MODELS.md). Для пересборки collector нужны обучающие
 данные, которых нет в git.
 
-Q3_K_M/Q2_K прикреплены к тому же release и скачиваются так:
-
-```powershell
-web2spec download-models --only collector-q3   # экспериментальные planner + extractor
-web2spec download-models --only collector-q2
-```
+Опциональные Q3_K_M/Q2_K, f16- и merged-артефакты не распространяются: они
+собираются локально, их хеши — в
+[`models/checksums-extra.sha256`](models/checksums-extra.sha256).
 
 PyTorch fallback (`--backend hf`) требует extra `hf`:
 

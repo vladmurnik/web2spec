@@ -19,8 +19,8 @@ web2spec mcp
 | Скрипт | Назначение |
 |---|---|
 | `00_install.ps1`, `00_install.sh` | установка venv, зависимостей, моделей и doctor |
-| `00_download_models.py` | скачивание GGUF и проверка SHA-256; Q4/Q3/Q2 и группы `collector-*` |
-| `00_upload_models.py` | зеркалирование GGUF/merged на Hugging Face (нужен `HF_TOKEN`) |
+| `00_download_models.py` | скачивание Q4_K_M runtime GGUF и проверка SHA-256 |
+| `00_upload_models.py` | зеркалирование Q4_K_M runtime GGUF на Hugging Face (нужен `HF_TOKEN`) |
 | `01_validate.py` | нормализация JSONL, валидация, дедуп, splits |
 | `02_train.py` | QLoRA-обучение или dry-run |
 | `03_merge.py` | слияние LoRA-адаптера с базовой моделью |

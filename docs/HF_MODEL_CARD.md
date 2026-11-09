@@ -16,8 +16,7 @@ tags:
 # web2spec collector models
 
 Fine-tuned Qwen2.5-0.5B models for the local web2spec planner/extractor cascade.
-The runtime uses only the GGUF files; the merged directories are provided for
-inspection and further fine-tuning.
+The runtime uses only the Q4_K_M GGUF files.
 
 ## Files
 
@@ -25,17 +24,9 @@ inspection and further fine-tuning.
 | --- | --- | --- |
 | `gguf/qwen05b-plan-Q4_K_M.gguf` | planner | default runtime |
 | `gguf/qwen05b-plan-extract-v2-Q4_K_M.gguf` | extractor | default runtime |
-| `gguf/qwen05b-plan-Q3_K_M.gguf` | planner | smaller/experimental |
-| `gguf/qwen05b-plan-extract-v2-Q3_K_M.gguf` | extractor | smaller/experimental |
-| `gguf/qwen05b-plan-Q2_K.gguf` | planner | smallest/experimental |
-| `gguf/qwen05b-plan-extract-v2-Q2_K.gguf` | extractor | smallest/experimental |
-| `gguf/qwen05b-plan-f16.gguf` | planner | source precision |
-| `gguf/qwen05b-plan-extract-v2-f16.gguf` | extractor | source precision |
-| `merged/qwen05b-plan/` | planner | merged Hugging Face directory |
-| `merged/qwen05b-plan-extract-v2/` | extractor | merged Hugging Face directory |
 
-The Q4_K_M files are the measured default. Q3_K_M and Q2_K are provided for
-low-memory experiments; their quality is not benchmarked in this model card.
+The Q4_K_M files are the measured default. Experimental Q3_K_M/Q2_K, f16 and
+merged artifacts are local-only and are not published in this repository.
 
 ## Usage
 

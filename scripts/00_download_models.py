@@ -1,6 +1,6 @@
 """Download the runtime GGUF models and verify their SHA-256 hashes.
 
-The analyst is published by the Qwen team.  The two 0.5B collector models are
+The analyst is published by the Qwen team.  The two Q4_K_M collector models are
 fine-tuned in this repository and attached to the GitHub release.  Nothing is
 downloaded implicitly by the runtime: this command makes the model step
 explicit and verifiable.
@@ -60,38 +60,12 @@ MODELS = {
         f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q4_K_M.gguf",
         "380 MB",
     ),
-    "planner-q3": Model(
-        "planner-q3",
-        "qwen05b-plan-Q3_K_M.gguf",
-        f"{RELEASE_BASE}/qwen05b-plan-Q3_K_M.gguf",
-        "340 MB",
-    ),
-    "extractor-q3": Model(
-        "extractor-q3",
-        "qwen05b-plan-extract-v2-Q3_K_M.gguf",
-        f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q3_K_M.gguf",
-        "340 MB",
-    ),
-    "planner-q2": Model(
-        "planner-q2",
-        "qwen05b-plan-Q2_K.gguf",
-        f"{RELEASE_BASE}/qwen05b-plan-Q2_K.gguf",
-        "325 MB",
-    ),
-    "extractor-q2": Model(
-        "extractor-q2",
-        "qwen05b-plan-extract-v2-Q2_K.gguf",
-        f"{RELEASE_BASE}/qwen05b-plan-extract-v2-Q2_K.gguf",
-        "325 MB",
-    ),
 }
 
 DEFAULT_MODELS = ("analyst", "planner", "extractor")
 GROUPS = {
     "all": DEFAULT_MODELS,
     "collector": ("planner", "extractor"),
-    "collector-q3": ("planner-q3", "extractor-q3"),
-    "collector-q2": ("planner-q2", "extractor-q2"),
 }
 
 
@@ -193,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
         help=(
             "model or group: all (default runtime), collector (Q4_K_M), "
-            "collector-q3, collector-q2, or one model name"
+            "or one model name"
         ),
     )
     parser.add_argument("--dest", type=Path, default=DEFAULT_DEST)

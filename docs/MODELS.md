@@ -24,12 +24,14 @@ The files are not stored in git.
 Both are generated from the local f16 checkpoints and are **experimental**:
 the measured default remains Q4_K_M. A smaller file does not guarantee a lower
 peak VRAM because the KV cache and context dominate on the 4B analyst path.
-Both variants are attached to the `v0.4.0` release and can be downloaded with
-the commands below.
+These variants are not distributed through the GitHub release. Build them
+locally; their hashes are in
+[`models/checksums-extra.sha256`](../models/checksums-extra.sha256).
 
 ### Optional f16 and merged artifacts
 
-For re-quantization and the PyTorch fallback, the `v0.4.0` release also ships:
+For re-quantization and the PyTorch fallback, these artifacts can be built
+locally:
 
 | File | Contents | Size |
 | --- | --- | ---: |
@@ -38,9 +40,9 @@ For re-quantization and the PyTorch fallback, the `v0.4.0` release also ships:
 | `qwen05b-plan-merged.zip` | merged planner, HF format | 953.4 MB |
 | `qwen05b-plan-extract-v2-merged.zip` | merged extractor v2, HF format | 953.4 MB |
 
-Their hashes are in
-[`models/checksums-extra.sha256`](../models/checksums-extra.sha256). Unzip the
-merged archives into `models/merged/`; the PyTorch fallback expects
+They are not attached to the release. Their hashes are in
+[`models/checksums-extra.sha256`](../models/checksums-extra.sha256). Unzip a
+locally built merged archive into `models/merged/`; the PyTorch fallback expects
 `models/merged/qwen05b-plan` and `models/merged/qwen05b-plan-extract-v2`.
 `download-models` does not fetch these optional artifacts.
 
@@ -48,8 +50,6 @@ merged archives into `models/merged/`; the PyTorch fallback expects
 
 ```powershell
 web2spec download-models --only all
-web2spec download-models --only collector-q3
-web2spec download-models --only collector-q2
 web2spec download-models --check
 ```
 
@@ -64,12 +64,12 @@ The analyst is fetched from the official Qwen GGUF repository:
 https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF
 ```
 
-The two 0.5B collector GGUFs are attached to the GitHub release for the current
-version. If the release asset is unavailable, build them from the training
-pipeline described below.
+The two Q4_K_M collector GGUFs are attached to the GitHub release for the
+current version. If the release asset is unavailable, build them from the
+training pipeline described below.
 
-The repository includes an explicit, token-based path for mirroring the
-fine-tuned artifacts to Hugging Face:
+The repository includes an explicit, token-based path for mirroring the Q4_K_M
+runtime artifacts to Hugging Face:
 
 ```powershell
 pip install -e ".[upload]"
@@ -78,9 +78,9 @@ web2spec upload-models --dry-run
 web2spec upload-models
 ```
 
-When uploaded, the mirror contains the Q4/Q3/Q2 GGUFs, the f16 GGUFs and the
-merged planner and extractor directories. The 4B analyst is not uploaded: it
-comes from the official Qwen repository.
+The mirror contains only the two Q4_K_M collector GGUFs and the model card.
+Experimental Q3_K_M/Q2_K, f16 and merged directories stay local. The 4B analyst
+is not uploaded: it comes from the official Qwen repository.
 
 ## Provenance
 

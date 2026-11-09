@@ -1,6 +1,10 @@
-# SHA-256 checksums for optional f16 and merged artifacts.
+# SHA-256 checksums for optional local artifacts that are not distributed.
 # Format: <sha256>  <filename>
 
+c3954ce22ae221e5e4e567af45a50d00126ab3a301a0482897351ad782e55031  qwen05b-plan-extract-v2-Q3_K_M.gguf
+dff8bdccd283852b93965e68a7dee5f3cdc75dcba6209f470fb8adb8ff1fb4e2  qwen05b-plan-Q3_K_M.gguf
+d34e5f38210a4afd77ce83f5f27cd414d64c137aeaba50fde3a2c65a7bd65083  qwen05b-plan-extract-v2-Q2_K.gguf
+6ce85c4953f7823093a7b3e334cdc2c1c6f2c9b957dc0a867f44396539cd5f38  qwen05b-plan-Q2_K.gguf
 02383b1409136ff0cff9e6efa1492f129ad9fdb6212d956bb8b9469f952d686b  qwen05b-plan-f16.gguf
 bcb25a8014f9f192043e63fe6faa1dfabce3f43dd4c9650a5fe88099b7efc6fc  qwen05b-plan-extract-v2-f16.gguf
 22ed6519f38599de7673a7ab3b36a960c83e67dc3676488f113f56c04ac40bb1  qwen05b-plan-merged.zip

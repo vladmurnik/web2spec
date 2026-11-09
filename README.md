@@ -168,10 +168,10 @@ to the repository checkout, so this is a repository-first project rather than a
 library-only wheel.
 
 `download-models` verifies SHA-256 hashes from
-[`models/checksums.sha256`](models/checksums.sha256). The two 0.5B collector
+[`models/checksums.sha256`](models/checksums.sha256). The two Q4_K_M collector
 models are attached to the GitHub release; the 4B analyst comes from the
-official Qwen GGUF repository. Optional f16 GGUFs and merged HF-format archives
-are attached too. Model files are not stored in git.
+official Qwen GGUF repository. Optional Q3_K_M/Q2_K, f16 and merged artifacts
+are local-only and are not distributed. Model files are not stored in git.
 
 Expected `doctor` output:
 
@@ -333,20 +333,16 @@ OpenAI-compatible server). Without it, the task text is used as the query.
 | Planner (`collect`) | `qwen05b-plan-Q4_K_M.gguf` | 379.4 MB | fine-tuned Qwen2.5-0.5B |
 | Extractor (`collect`) | `qwen05b-plan-extract-v2-Q4_K_M.gguf` | 379.4 MB | fine-tuned Qwen2.5-0.5B |
 
-Base models are Apache-2.0. The fine-tuned GGUFs are attached to the GitHub
-release; the same artifacts can be mirrored to Hugging Face with
+Base models are Apache-2.0. The Q4_K_M collector GGUFs are attached to the
+GitHub release; the same runtime artifacts can be mirrored to Hugging Face with
 `upload-models`. See [`docs/MODELS.md`](docs/MODELS.md) for checksums, rebuild
-steps, optional Q3_K_M/Q2_K variants, f16 and merged artifacts, and the
+steps, optional local Q3_K_M/Q2_K, f16 and merged artifacts, and the
 quantization caveat. Rebuilding the collector requires the training data, which
 is not committed.
 
-The Q3_K_M/Q2_K files are attached to the same release and can be downloaded
-with:
-
-```powershell
-web2spec download-models --only collector-q3   # experimental smaller planner + extractor
-web2spec download-models --only collector-q2
-```
+The optional Q3_K_M/Q2_K, f16 and merged artifacts are not distributed. They are
+built locally from the training pipeline; their hashes are in
+[`models/checksums-extra.sha256`](models/checksums-extra.sha256).
 
 The PyTorch fallback (`--backend hf`) requires the `hf` extra:
 

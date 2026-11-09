@@ -14,13 +14,13 @@ version of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--no-cache`, and cache hit statistics.
 - Incremental collector and search runs through `--previous`: unchanged pages
   are reused by content hash without starting either model.
-- Experimental Q3_K_M and Q2_K collector GGUFs, with checksums and
-  `download-models --only collector-q3|collector-q2`; the files are attached
-  to the `v0.4.0` release.
+- Experimental Q3_K_M and Q2_K collector GGUFs, generated locally with hashes
+  in `models/checksums-extra.sha256`; they are not distributed.
 - Optional f16 GGUFs and merged HF-format archives for both collector models,
-  attached to the `v0.4.0` release with `models/checksums-extra.sha256`.
-- `upload-models` and `docs/HF_MODEL_CARD.md` for the Hugging Face mirror; the
-  actual upload requires an `HF_TOKEN` and is not performed automatically.
+  kept local with hashes in `models/checksums-extra.sha256`.
+- `upload-models` and `docs/HF_MODEL_CARD.md` for mirroring only the Q4_K_M
+  runtime models; the actual upload requires an `HF_TOKEN` and is not performed
+  automatically.
 - Dated real-page benchmark harness (`web2spec benchmark`) covering docs,
   API reference, pricing and product specs.
 - `content_hash` and `cache_hit` fields in collector reports.
@@ -29,8 +29,15 @@ version of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- `download-models --only all` still fetches the three default runtime models;
-  smaller variants are explicit opt-ins.
+- `download-models --only all` fetches the three default runtime models; the
+  Q3_K_M/Q2_K variants are local builds and are no longer download groups.
+- The public release asset set is limited to the Q4_K_M planner/extractor and
+  `checksums.sha256`; optional artifacts are not hosted.
+
+### Removed
+
+- Optional Q3_K_M/Q2_K, f16 and merged assets from the `v0.4.0` release. The
+  public release now contains only the models used by the CLI/MCP runtime.
 
 ## [0.4.0] - 2026-11-06
 
